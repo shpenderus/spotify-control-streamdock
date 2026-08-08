@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Spotify Control</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="head">
+      <div class="logo">
+        <svg viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">
+          <path d="M29 22 L50 36 L29 50 Z" fill="#121212"/>
+        </svg>
+      </div>
+      <div>
+        <div class="title">Spotify Control</div>
+        <div class="status" id="status">Загрузка…</div>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>Аккаунт Spotify</h2>
+
+      <label class="field">Client ID
+        <input id="clientId" type="text" placeholder="Ваш Client ID" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label class="field">Client Secret
+        <input id="clientSecret" type="password" placeholder="Ваш Client Secret" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label class="field">Redirect URI
+        <input id="redirectUri" type="text" value="http://127.0.0.1:8888/callback" autocomplete="off" spellcheck="false">
+      </label>
+
+      <div class="hint">Нет приложения? <a class="link" href="https://developer.spotify.com/dashboard" target="_blank">Создайте на developer.spotify.com</a> и добавьте адрес выше в «Redirect URIs».</div>
+
+      <div class="row">
+        <button id="loginBtn" class="btn primary">Войти через Spotify</button>
+        <button id="logoutBtn" class="btn ghost" disabled>Выйти</button>
+      </div>
+
+      <a id="loginLink" class="link" href="#" target="_blank" hidden>Если браузер не открылся — нажмите сюда</a>
+      <div id="authMsg" class="msg"></div>
+
+      <button id="logBtn" class="btn ghost" style="margin-top:10px">Лог плагина</button>
+    </section>
+
+    <section class="card" id="logBox" hidden>
+      <h2>Лог плагина</h2>
+      <textarea id="logText" readonly spellcheck="false" placeholder="Лог пуст"></textarea>
+      <div class="row">
+        <button id="copyLogBtn" class="btn ghost" disabled>Копировать</button>
+        <button id="hideLogBtn" class="btn ghost">Скрыть</button>
+      </div>
+      <div class="hint" style="margin:8px 0 0">Если лог пуст — плагин не запустился вовсе. Скопируйте текст и пришлите его, это поможет найти причину.</div>
+    </section>
+
+    <section class="card" id="displayCard" hidden>
+      <h2>Что показывать на кнопке</h2>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="optCover" checked> Обложка</label>
+        <label class="check"><input type="checkbox" id="optTitle" checked> Название</label>
+        <label class="check"><input type="checkbox" id="optArtist" checked> Исполнитель</label>
+        <label class="check"><input type="checkbox" id="optTime"> Время</label>
+        <label class="check" id="iconWrap" hidden><input type="checkbox" id="optIcon"> Иконка play/pause</label>
+      </div>
+      <label class="slider-label">Размер шрифта: <span id="fontVal">13</span>
+        <input type="range" id="optFont" min="6" max="30" step="1" value="13">
+      </label>
+      <label class="check"><input type="checkbox" id="optContrast" checked> Авто-контраст текста по обложке</label>
+      <label class="check"><input type="checkbox" id="optProgress" checked> Прогресс-бар</label>
+      <div class="row">
+        <label class="field" style="flex:1;margin:0">Цвет времени
+          <input type="color" id="optTimeColor" value="#1DB954" style="padding:0;height:34px;width:100%">
+        </label>
+        <button id="timeColorApply" class="btn ghost" style="align-self:flex-end">Применить</button>
+      </div>
+      <div class="hint">Если название или исполнитель не помещаются в кнопку — текст автоматически прокручивается бегущей строкой. Авто-контраст подбирает чёрный или белый текст по яркости обложки, чтобы он не сливался.</div>
+    </section>
+
+    <section class="card">
+      <h2>Сейчас играет</h2>
+      <div class="player" id="playerInfo">—</div>
+    </section>
+
+  </div>
+  <script src="pi.js"></script>
+</body>
+</html>

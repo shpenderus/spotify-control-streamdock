@@ -1,0 +1,226 @@
+{
+  "Actions": [
+    {
+      "Icon": "imgs/play.svg",
+      "Name": "Play/Pause",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/play.svg",
+          "Name": "Play/Pause"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Pause/resume playback. Shows the current track cover and state.",
+      "UUID": "com.spotify.control.playpause",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/info.svg",
+      "Name": "Now Playing",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/info.svg",
+          "Name": "Now Playing"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false,
+      "Tooltip": "Shows the cover, title, artist and time of the current track. What to display and the font size are configured in the property inspector.",
+      "UUID": "com.spotify.control.info",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/next.svg",
+      "Name": "Next Track",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/next.svg",
+          "Name": "Next"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Skip to the next track",
+      "UUID": "com.spotify.control.next",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/previous.svg",
+      "Name": "Previous Track",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/previous.svg",
+          "Name": "Previous"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Go back to the previous track",
+      "UUID": "com.spotify.control.previous",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/like.svg",
+      "Name": "Like",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/like.svg",
+          "Name": "Not Liked"
+        },
+        {
+          "Image": "imgs/liked.svg",
+          "Name": "Liked"
+        },
+        {
+          "Image": "imgs/like-unknown.svg",
+          "Name": "Unknown"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Like/unlike the current track. The state is shown on the button.",
+      "UUID": "com.spotify.control.like",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/repeat.svg",
+      "Name": "Repeat",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/repeat-off.svg",
+          "Name": "Off"
+        },
+        {
+          "Image": "imgs/repeat.svg",
+          "Name": "Playlist"
+        },
+        {
+          "Image": "imgs/repeat1.svg",
+          "Name": "One Track"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Cycles repeat mode: off → one track → playlist. The state is shown on the button.",
+      "UUID": "com.spotify.control.repeat",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/shuffle.svg",
+      "Name": "Shuffle",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/shuffle-off.svg",
+          "Name": "Off"
+        },
+        {
+          "Image": "imgs/shuffle.svg",
+          "Name": "On"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Toggle shuffle. The state is shown on the button.",
+      "UUID": "com.spotify.control.shuffle",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/seek.svg",
+      "Name": "Seek (Encoder)",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/seek.svg",
+          "Name": "Seek"
+        }
+      ],
+      "Controllers": [
+        "Knob"
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Rotate: seek within the track (1 step = 5 seconds). Press: play/pause. Shows the current track time.",
+      "UUID": "com.spotify.control.seek",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/next.svg",
+      "Name": "Tracks (Encoder)",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/next.svg",
+          "Name": "Track"
+        }
+      ],
+      "Controllers": [
+        "Knob"
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Rotate: next/previous track. Press: play/pause.",
+      "UUID": "com.spotify.control.track",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/volume.svg",
+      "Name": "Volume (Encoder)",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/volume.svg",
+          "Name": "Volume"
+        }
+      ],
+      "Controllers": [
+        "Knob"
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Rotate: volume ±2% per step. Press: play/pause. Shows the current volume level.",
+      "UUID": "com.spotify.control.volume",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    }
+  ],
+  "SDKVersion": 1,
+  "Author": "Freebuff",
+  "Name": "Spotify Control",
+  "Icon": "imgs/logo.svg",
+  "CodePathWin": "plugin/index.js",
+  "CodePathMac": "plugin/index.js",
+  "Description": "Spotify control: play/pause with track cover, a Now Playing button with configurable display (cover, title, artist, time, font size, cover-based auto contrast, progress bar), next/previous track, like, repeat, shuffle. Long text scrolls as a marquee.",
+  "Category": "Spotify",
+  "CategoryIcon": "imgs/logo.svg",
+  "Version": "1.0.0",
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.11"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "7"
+    }
+  ],
+  "Software": {
+    "MinimumVersion": "3.10.188.226"
+  },
+  "Nodejs": {
+    "Version": "20"
+  }
+}

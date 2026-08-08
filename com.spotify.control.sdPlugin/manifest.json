@@ -1,0 +1,226 @@
+{
+  "Actions": [
+    {
+      "Icon": "imgs/play.svg",
+      "Name": "Плей/Пауза",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/play.svg",
+          "Name": "Play/Pause"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Пауза/воспроизведение. Показывает обложку текущего трека и состояние.",
+      "UUID": "com.spotify.control.playpause",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/info.svg",
+      "Name": "Сейчас играет",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/info.svg",
+          "Name": "Now Playing"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false,
+      "Tooltip": "Показывает обложку, название, исполнителя и время трека. Что отображать и размер шрифта настраивается в панели.",
+      "UUID": "com.spotify.control.info",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/next.svg",
+      "Name": "Следующий трек",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/next.svg",
+          "Name": "Next"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Переключить на следующий трек",
+      "UUID": "com.spotify.control.next",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/previous.svg",
+      "Name": "Предыдущий трек",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/previous.svg",
+          "Name": "Previous"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Переключить на предыдущий трек",
+      "UUID": "com.spotify.control.previous",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/like.svg",
+      "Name": "Лайк",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/like.svg",
+          "Name": "Not Liked"
+        },
+        {
+          "Image": "imgs/liked.svg",
+          "Name": "Liked"
+        },
+        {
+          "Image": "imgs/like-unknown.svg",
+          "Name": "Unknown"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Поставить/убрать лайк текущему треку. Состояние отображается на кнопке.",
+      "UUID": "com.spotify.control.like",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/repeat.svg",
+      "Name": "Повтор",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/repeat-off.svg",
+          "Name": "Off"
+        },
+        {
+          "Image": "imgs/repeat.svg",
+          "Name": "Playlist"
+        },
+        {
+          "Image": "imgs/repeat1.svg",
+          "Name": "One Track"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Циклически переключает повтор: выкл → один трек → плейлист. Состояние отображается на кнопке.",
+      "UUID": "com.spotify.control.repeat",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/shuffle.svg",
+      "Name": "Перемешивание",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/shuffle-off.svg",
+          "Name": "Off"
+        },
+        {
+          "Image": "imgs/shuffle.svg",
+          "Name": "On"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Включить/выключить перемешивание. Состояние отображается на кнопке.",
+      "UUID": "com.spotify.control.shuffle",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/seek.svg",
+      "Name": "Перемотка (энкодер)",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/seek.svg",
+          "Name": "Seek"
+        }
+      ],
+      "Controllers": [
+        "Knob"
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Вращение: перемотка внутри трека (1 шаг = 5 секунд). Нажатие: плей/пауза. Показывает текущее время трека.",
+      "UUID": "com.spotify.control.seek",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/next.svg",
+      "Name": "Треки (энкодер)",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/next.svg",
+          "Name": "Track"
+        }
+      ],
+      "Controllers": [
+        "Knob"
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Вращение: следующий/предыдущий трек. Нажатие: плей/пауза.",
+      "UUID": "com.spotify.control.track",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/volume.svg",
+      "Name": "Громкость (энкодер)",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/volume.svg",
+          "Name": "Volume"
+        }
+      ],
+      "Controllers": [
+        "Knob"
+      ],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Вращение: громкость ±2% за шаг. Нажатие: плей/пауза. Показывает текущий уровень громкости.",
+      "UUID": "com.spotify.control.volume",
+      "PropertyInspectorPath": "propertyInspector/index.html"
+    }
+  ],
+  "SDKVersion": 1,
+  "Author": "Freebuff",
+  "Name": "Spotify Control",
+  "Icon": "imgs/logo.svg",
+  "CodePathWin": "plugin/index.js",
+  "CodePathMac": "plugin/index.js",
+  "Description": "Управление Spotify: плей/пауза с обложкой трека, кнопка «Сейчас играет» с настраиваемым отображением (обложка, название, исполнитель, время, размер шрифта, авто-контраст по обложке, прогресс-бар), следующий/предыдущий трек, лайк, повтор, перемешивание. Длинный текст прокручивается бегущей строкой.",
+  "Category": "Spotify",
+  "CategoryIcon": "imgs/logo.svg",
+  "Version": "1.0.0",
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.11"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "7"
+    }
+  ],
+  "Software": {
+    "MinimumVersion": "3.10.188.226"
+  },
+  "Nodejs": {
+    "Version": "20"
+  }
+}
