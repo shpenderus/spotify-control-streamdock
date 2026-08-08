@@ -335,23 +335,25 @@ class StaticIconAction extends Action {
   }
 }
 
-// Состояния кнопок переключаются через setState (как в официальном плагине MiraBox):
-// StreamDock гарантированно применяет смену состояния, тогда как повторные setImage могут игнорироваться.
+// Лайк/повтор/шаффл рисуются через setImage (готовые SVG data-URL), а не setState:
+// на StreamDock (MiraBox) setState оставляет кнопку пустой на устройстве (приложение
+// не находит картинку состояния), тогда как setImage работает всегда.
 class LikeAction extends Action {
   constructor() { super('like', {}); }
 
-  // 0 = не лайкнут, 1 = лайкнут, 2 = статус неизвестен (загружается / нет прав user-library-read)
-  likeIndex() {
-    if (!state.likedKnown) return 2;
-    return state.liked ? 1 : 0;
+  // 'like' = не лайкнут, 'liked' = лайкнут, 'like-load' = статус неизвестен (загружается / нет прав)
+  likeIcon() {
+    if (!state.likedKnown) return 'like-load';
+    return state.liked ? 'liked' : 'like';
   }
 
   render(ctx) {
-    plugin.setState(ctx, this.likeIndex());
+    this.setIcon(ctx, render.iconSvg(this.likeIcon(), this.pressed.has(ctx)));
   }
 
   keyUp(ctx) {
-    this.render(ctx);
+    this.pressed.delete(ctx);
+    this.render(ctx, true);
     toggleLike(ctx);
   }
 }
@@ -359,16 +361,17 @@ class LikeAction extends Action {
 class RepeatAction extends Action {
   constructor() { super('repeat', {}); }
 
-  repeatIndex() {
-    return state.repeat === 'track' ? 2 : (state.repeat === 'context' ? 1 : 0);
+  repeatIcon() {
+    return state.repeat === 'track' ? 'repeat1' : (state.repeat === 'context' ? 'repeat' : 'repeat-off');
   }
 
   render(ctx) {
-    plugin.setState(ctx, this.repeatIndex());
+    this.setIcon(ctx, render.iconSvg(this.repeatIcon(), this.pressed.has(ctx)));
   }
 
   keyUp(ctx) {
-    this.render(ctx);
+    this.pressed.delete(ctx);
+    this.render(ctx, true);
     cycleRepeat(ctx);
   }
 }
@@ -377,11 +380,12 @@ class ShuffleAction extends Action {
   constructor() { super('shuffle', {}); }
 
   render(ctx) {
-    plugin.setState(ctx, state.shuffle ? 1 : 0);
+    this.setIcon(ctx, render.iconSvg(state.shuffle ? 'shuffle' : 'shuffle-off', this.pressed.has(ctx)));
   }
 
   keyUp(ctx) {
-    this.render(ctx);
+    this.pressed.delete(ctx);
+    this.render(ctx, true);
     toggleShuffle(ctx);
   }
 }
@@ -613,6 +617,12 @@ function renderAll(force) {
   renderLikeAll();
   renderRepeatAll();
   renderShuffleAll();
+  // Статические иконки (next/previous/энкодеры) рисуются только один раз в willAppear,
+  // поэтому стартовые перерисовки (ретрай вызывает renderAll(true)) должны доходить
+  // и до них — иначе устройство теряет картинку при старте, и кнопка остаётся пустой.
+  for (const name of ['next', 'previous', 'seek', 'track', 'volume']) {
+    for (const ctx of actions[name].contexts) actions[name].render(ctx, force);
+  }
 }
 
 /* ============================== Опрос Spotify ============================== */
@@ -787,6 +797,30 @@ setInterval(tick, 1000);
 // когда меняется фаза кадра (2 кадра/с) — дедупликация в сигнатуре
 setInterval(() => { if (auth.hasToken()) renderDynamicAll(false); }, 100);
 setTimeout(poll, 500);
+
+// StreamDock (MiraBox) молча теряет setImage/setState, отправленные в первые
+// мгновения после подключения плагина, пока устройство ещё инициализирует
+// клавиши. Кнопки, которые рисуются один раз в willAppear (next, previous,
+// энкодеры), остались бы на устройстве пустыми до первого нажатия.
+// Повторно отправляем картинки всех кнопок несколько раз с задержкой.
+{
+  // Ранние проходы лучше накрывают стартовое окно потери картинок, чем один интервал
+  const delays = [400, 1000, 1800, 2800, 4000, 5500];
+  let i = 0;
+  const rearm = () => {
+    if (i >= delays.length) return;
+    setTimeout(() => {
+      for (const name of Object.keys(actions)) {
+        actions[name].icons.clear();
+        actions[name].sig.clear();
+      }
+      renderAll(true);
+      i++;
+      rearm();
+    }, delays[i]);
+  };
+  rearm();
+}
 
 /* ============================== Обработка нажатий ============================== */
 

@@ -335,23 +335,25 @@ class StaticIconAction extends Action {
   }
 }
 
-// State buttons switch via setState (like the official MiraBox plugin):
-// StreamDock reliably applies state changes, while repeated setImage calls may be ignored.
+// Like/Repeat/Shuffle render via setImage (rendered SVG data-URLs), NOT setState:
+// on StreamDock (MiraBox) setState blanks the button on the device (the app
+// fails to resolve the manifest state image), while setImage always works.
 class LikeAction extends Action {
   constructor() { super('like', {}); }
 
-  // 0 = not liked, 1 = liked, 2 = status unknown (loading / no user-library-read scope)
-  likeIndex() {
-    if (!state.likedKnown) return 2;
-    return state.liked ? 1 : 0;
+  // 'like' = not liked, 'liked' = liked, 'like-load' = status unknown (loading / no user-library-read scope)
+  likeIcon() {
+    if (!state.likedKnown) return 'like-load';
+    return state.liked ? 'liked' : 'like';
   }
 
   render(ctx) {
-    plugin.setState(ctx, this.likeIndex());
+    this.setIcon(ctx, render.iconSvg(this.likeIcon(), this.pressed.has(ctx)));
   }
 
   keyUp(ctx) {
-    this.render(ctx);
+    this.pressed.delete(ctx);
+    this.render(ctx, true);
     toggleLike(ctx);
   }
 }
@@ -359,16 +361,17 @@ class LikeAction extends Action {
 class RepeatAction extends Action {
   constructor() { super('repeat', {}); }
 
-  repeatIndex() {
-    return state.repeat === 'track' ? 2 : (state.repeat === 'context' ? 1 : 0);
+  repeatIcon() {
+    return state.repeat === 'track' ? 'repeat1' : (state.repeat === 'context' ? 'repeat' : 'repeat-off');
   }
 
   render(ctx) {
-    plugin.setState(ctx, this.repeatIndex());
+    this.setIcon(ctx, render.iconSvg(this.repeatIcon(), this.pressed.has(ctx)));
   }
 
   keyUp(ctx) {
-    this.render(ctx);
+    this.pressed.delete(ctx);
+    this.render(ctx, true);
     cycleRepeat(ctx);
   }
 }
@@ -377,11 +380,12 @@ class ShuffleAction extends Action {
   constructor() { super('shuffle', {}); }
 
   render(ctx) {
-    plugin.setState(ctx, state.shuffle ? 1 : 0);
+    this.setIcon(ctx, render.iconSvg(state.shuffle ? 'shuffle' : 'shuffle-off', this.pressed.has(ctx)));
   }
 
   keyUp(ctx) {
-    this.render(ctx);
+    this.pressed.delete(ctx);
+    this.render(ctx, true);
     toggleShuffle(ctx);
   }
 }
@@ -613,6 +617,12 @@ function renderAll(force) {
   renderLikeAll();
   renderRepeatAll();
   renderShuffleAll();
+  // Static icons (next/previous/encoders) are rendered only once at willAppear,
+  // so startup re-renders (the retry loop calls renderAll(true)) must reach
+  // them too — otherwise the device's startup image drop leaves them blank.
+  for (const name of ['next', 'previous', 'seek', 'track', 'volume']) {
+    for (const ctx of actions[name].contexts) actions[name].render(ctx, force);
+  }
 }
 
 /* ============================== Spotify polling ============================== */
@@ -787,6 +797,30 @@ setInterval(tick, 1000);
 // (2 fps) — deduplication via the signature
 setInterval(() => { if (auth.hasToken()) renderDynamicAll(false); }, 100);
 setTimeout(poll, 500);
+
+// StreamDock (MiraBox) silently drops setImage/setState messages sent in the
+// first moments after the plugin connects, while the device is still
+// initializing its keys. Buttons rendered only once at willAppear (next,
+// previous, encoders) would stay blank on the device until the first press.
+// Re-send every button image a few times with a short delay after startup.
+{
+  // Early passes catch the device's startup drop window better than one fixed interval
+  const delays = [400, 1000, 1800, 2800, 4000, 5500];
+  let i = 0;
+  const rearm = () => {
+    if (i >= delays.length) return;
+    setTimeout(() => {
+      for (const name of Object.keys(actions)) {
+        actions[name].icons.clear();
+        actions[name].sig.clear();
+      }
+      renderAll(true);
+      i++;
+      rearm();
+    }, delays[i]);
+  };
+  rearm();
+}
 
 /* ============================== Press handling ============================== */
 
