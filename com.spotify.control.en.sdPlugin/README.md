@@ -59,7 +59,7 @@ Compatible with Mirabox Stream Dock (StreamDock / HotSpot software), Ajazz Strea
 ## Notes
 
 - Playback control (play/pause, next/previous, repeat, seek, volume) requires **Spotify Premium**.
-- Seeking works through the official Spotify API (`PUT /v1/me/player/seek`) — unlike the Yandex plugin, which has to drag a slider inside the web player.
+- Seeking works through the official Spotify API (`PUT /v1/me/player/seek`).
 - Likes use the library endpoints, which don't list Premium as a requirement in the API reference (only the `user-library-read` / `user-library-modify` scopes). However, the main Web API page has a general note about needing Premium, so likes are not officially guaranteed on the free tier. The like status is cached: when StreamDock starts, the button immediately shows the correct state.
 - **Likes use the legacy `/v1/me/library` endpoints** (like the official MiraBox plugin): on some accounts the modern `/v1/me/tracks` endpoints return 403 even with the scopes in place. The plugin tries the modern endpoints first and automatically switches to the legacy ones on error, remembering them.
 - The like status is always confirmed against the real Spotify response (requests are serialized, no races), and when pressing with an unknown status the plugin first fetches the real status and only then toggles — the button no longer "lies" or unlikes blindly.
@@ -82,7 +82,3 @@ When asking for help, send the recent lines with the `[scopes]`, `[summary]`, `[
 - **The log is empty or the file doesn't exist** — StreamDock doesn't run Node plugins (possibly an old software version). Update StreamDock.
 - **"Invalid redirect URI"** — the address in the plugin field must exactly match the one in the Spotify app settings (including the port): `http://127.0.0.1:8888/callback`.
 - **Port 8888 is busy** — change the port in both places (the Redirect URI field in the plugin and the Spotify app settings), e.g. to `8899`.
-
-## Building a ZIP (if you need an archive)
-
-On Windows: select the `com.spotify.control.en.sdPlugin` folder → right-click → **Compress to ZIP file**.
