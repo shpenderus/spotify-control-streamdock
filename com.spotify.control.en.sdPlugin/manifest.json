@@ -206,7 +206,7 @@
   "Description": "Spotify control: play/pause with track cover, a Now Playing button with configurable display (cover, title, artist, time, font size, cover-based auto contrast, progress bar), next/previous track, like, repeat, shuffle. Long text scrolls as a marquee.",
   "Category": "Spotify",
   "CategoryIcon": "imgs/logo.svg",
-  "Version": "1.0.0",
+  "Version": "1.0.1",
   "OS": [
     {
       "Platform": "mac",

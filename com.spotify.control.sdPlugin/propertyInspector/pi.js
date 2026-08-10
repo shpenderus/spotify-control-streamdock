@@ -123,6 +123,10 @@ function wire() {
     if (!ensureWs()) return;
     sendToPlugin({ type: 'getLog' });
   });
+  $('optLogEnabled').addEventListener('change', function () {
+    if (!ensureWs()) return;
+    sendToPlugin({ type: 'setLogEnabled', enabled: $('optLogEnabled').checked });
+  });
   $('hideLogBtn').addEventListener('click', function () {
     $('logBox').hidden = true;
   });
@@ -238,6 +242,7 @@ function applyPi(payload) {
       if (payload.hasSecret) $('clientSecret').value = '********';
       if (payload.redirectUri) $('redirectUri').value = payload.redirectUri;
     }
+    $('optLogEnabled').checked = !!payload.logEnabled;
     updateAuth(payload);
   }
 

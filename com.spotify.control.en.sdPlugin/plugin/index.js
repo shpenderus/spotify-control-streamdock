@@ -7,7 +7,11 @@ const { SpotifyApi, AuthError } = require('./lib/spotify');
 const render = require('./lib/render');
 const { getBuffer, dataUrlFromBuffer, clamp, fmtTime } = require('./lib/util');
 const { averageLuminance } = require('./lib/luma');
-const { log, LOG_FILE } = require('./lib/log');
+const { log, LOG_FILE, setEnabled } = require('./lib/log');
+
+// "Write plugin log" is a user setting (default: OFF). When off, log() writes
+// nothing, so the plugin uses no resources for logging. Stored in global settings.
+let logEnabled = false;
 
 log('Plugin started, argv:', process.argv);
 
@@ -105,7 +109,13 @@ class Plugin {
     }
     log('Message from StreamDock:', data.event, data.action || '', pl !== undefined ? JSON.stringify(pl) : '');
     if (data.event === 'didReceiveGlobalSettings') {
-      const spot = (data.payload && data.payload.settings && data.payload.settings.spotify) || null;
+      const gs = (data.payload && data.payload.settings) || {};
+      const spot = gs.spotify || null;
+      // logging on/off — a global user setting (default: off)
+      if (typeof gs.logEnabled === 'boolean') {
+        logEnabled = gs.logEnabled;
+        setEnabled(logEnabled);
+      }
       // The plugin file is the source of truth (written synchronously on every token change),
       // while StreamDock global settings may be stale. Use them only if the file is missing.
       if (!auth.hasToken() && spot) auth.fromJSON(spot);
@@ -137,12 +147,21 @@ class Plugin {
         if (action) action.receiveSettings(ctx, settings);
         break;
       case 'keyDown':
+        // The device may have blanked keys during idle — redraw everything
+        // so the whole panel comes back on the first press.
+        bumpAll();
         if (action) action.keyDown(ctx);
         break;
       case 'keyUp':
         if (action) action.keyUp(ctx);
         break;
       case 'dialRotate':
+        // Same as keyDown — redraw everything (debounced, the encoder sends
+        // many ticks per turn) in case the device blanked during idle.
+        if (Date.now() - lastDialBump > 2000) {
+          lastDialBump = Date.now();
+          bumpAll();
+        }
         if (action) action.dialRotate(ctx, (data.payload && data.payload.ticks) || 0);
         break;
       case 'dialDown':
@@ -173,7 +192,7 @@ const plugin = new Plugin();
 
 const auth = new Auth({
   onStateChange: () => {
-    plugin.setGlobalSettings({ spotify: auth.toJSON() });
+    plugin.setGlobalSettings({ spotify: auth.toJSON(), logEnabled });
   },
   openUrl: (url) => plugin.openUrl(url)
 });
@@ -206,6 +225,7 @@ const state = {
   volume: null,       // 0..100, active device volume (from /me/player)
   deviceId: null,     // active device id (needed for /volume)
   lastPoll: 0,
+  endPollId: null, // track id we already fired the end-of-track poll for
   _lastTick: 0
 };
 
@@ -427,12 +447,12 @@ class TrackEncoderAction extends Action {
   dialRotate(ctx, ticks) {
     if (!ensureAuthed(ctx)) return;
     if (ticks > 0) {
-      spotify.next().then(() => poll()).catch((e) => {
+      spotify.next().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
         if (e instanceof AuthError) onAuthFailure();
         plugin.showAlert(ctx);
       });
     } else if (ticks < 0) {
-      spotify.previous().then(() => poll()).catch((e) => {
+      spotify.previous().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
         if (e instanceof AuthError) onAuthFailure();
         plugin.showAlert(ctx);
       });
@@ -503,15 +523,19 @@ for (const name of Object.keys(actions)) plugin.actions[name] = actions[name];
 const coverCache = new Map();    // url -> dataUrl
 const coverLuma = new Map();     // url -> average luminance of the bottom part (0..255) or null
 const coverLoading = new Map();  // url -> Promise
+const coverFailed = new Map();   // url -> timestamp of last failure (retry after 5 min)
 
 function ensureCover(url) {
   if (!url) return Promise.resolve(null);
   if (coverCache.has(url)) return Promise.resolve(coverCache.get(url));
+  const failedAt = coverFailed.get(url);
+  if (failedAt && Date.now() - failedAt < 300000) return Promise.resolve(null);
   if (coverLoading.has(url)) return coverLoading.get(url);
   const p = getBuffer(url)
     .then((r) => {
       const d = dataUrlFromBuffer(r.buffer, r.contentType);
       coverCache.set(url, d);
+      coverFailed.delete(url);
       // Luminance for text auto-contrast (black/white over the cover)
       try { coverLuma.set(url, averageLuminance(r.buffer)); } catch (e) { coverLuma.set(url, null); }
       while (coverCache.size > 12) {
@@ -523,8 +547,10 @@ function ensureCover(url) {
       renderAll(true); // cover loaded — re-render (and the text color too)
       return d;
     })
-    .catch(() => {
+    .catch((e) => {
       coverLoading.delete(url);
+      coverFailed.set(url, Date.now());
+      log('[cover] fetch failed:', e && e.message || e);
       return null;
     });
   coverLoading.set(url, p);
@@ -628,11 +654,15 @@ function renderAll(force) {
 /* ============================== Spotify polling ============================== */
 
 let polling = false;
+// Spotify rate limit (429): after a hit, don't poll again for a while so the
+// quota can reset — hammering the API during a 429 keeps the limit hot.
+let nextPollAt = 0;
 
 async function poll() {
   if (!auth.hasToken()) return;
   if (polling) return;
   polling = true;
+  nextPollAt = 0;
   try {
     const res = await spotify.getPlayer();
     if (res.status === 200 && res.data && res.data.item && res.data.item.type === 'track') {
@@ -673,6 +703,9 @@ async function poll() {
         state.empty = 'nodevice';
         renderAll(true);
       }
+    } else if (res.status === 429) {
+      log('[poll] 429 rate limit — backing off for 30s');
+      nextPollAt = Date.now() + 30000;
     } else if (res.status === 403) {
       if (state.empty !== 'premium') { state.empty = 'premium'; renderAll(true); }
     } else if (res.status === 401) {
@@ -750,8 +783,25 @@ async function doRefreshLike() {
 
 let _summaryAt = 0;
 
+function pollInterval() {
+  // While music is playing we poll every 10s (track changes, volume changes
+  // from other devices, like status). When paused there's nothing to track —
+  // poll every 60s so the daily dev-mode quota is barely touched.
+  // The end-of-track poll (below) fires right when a track finishes, so the
+  // next track's info still appears immediately despite the 10s interval.
+  return (state.isPlaying && state.track) ? 10000 : 60000;
+}
+
 function tick() {
   const now = Date.now();
+  // The machine was asleep (or the app/device stalled for a while): the device
+  // may have blanked its keys or re-enumerated. Push all images again with a
+  // few retries — the app may still be reconnecting the device right now.
+  const lastTick = state._lastTick || now;
+  if (now - lastTick > 15000) {
+    log('[wake] gap of ' + Math.round((now - lastTick) / 1000) + 's — re-rendering all buttons');
+    bumpAllDelayed();
+  }
   // Periodic state summary — so the log shows what the plugin sees
   // (track, volume, like, token scopes) without a pile of separate lines.
   if (now - _summaryAt > 30000) {
@@ -770,9 +820,20 @@ function tick() {
         return parts.join(' ') || (a.name + '=—');
       }).join(' | '));
   }
-  if (now - state.lastPoll > 2500) poll();
+  if (now >= nextPollAt && now - state.lastPoll > pollInterval()) poll();
   if (state.empty === 'none' && state.isPlaying && state.track) {
     state.progressMs = Math.min(state.track.durationMs, state.progressMs + (now - (state._lastTick || now)));
+  }
+  // The current track is about to end (local estimate) — poll right away so
+  // the next track's info (title, cover, like) appears immediately instead
+  // of waiting for the next 10s interval. One-shot per track: the marker
+  // stops a repeat flood if the request fails and progress stays at the end.
+  if (state.empty === 'none' && state.isPlaying && state.track &&
+      state.track.durationMs - state.progressMs <= 1000 &&
+      now >= nextPollAt &&
+      state.endPollId !== state.track.id) {
+    state.endPollId = state.track.id;
+    poll();
   }
   // Like: if the status is still unknown (or the first request failed) — retry
   if (state.track && !state.likedKnown && now > state.likeRetryAt && now > (state.like403At || 0)) {
@@ -822,6 +883,33 @@ setTimeout(poll, 500);
   rearm();
 }
 
+// Redraw every button, bypassing the render-signature deduplication, so the
+// images actually go out to the device again. Used after a wake-up and on a
+// key press / encoder turn (the device may have blanked keys during idle) —
+// but NOT on a timer: flooding the device with images while it is idle made
+// it stop responding to anything at all until the app was restarted.
+let wakeRenders = 0;
+let lastDialBump = 0;
+function bumpAll() {
+  for (const name of Object.keys(actions)) {
+    actions[name].icons.clear();
+    actions[name].sig.clear();
+  }
+  renderAll(true);
+}
+// After the machine wakes from sleep the device may take a moment to
+// re-enumerate, so push the images a few times with short delays.
+function bumpAllDelayed() {
+  if (wakeRenders) return;
+  wakeRenders = 1;
+  [0, 1500, 4000].forEach((d, i) => {
+    setTimeout(() => {
+      bumpAll();
+      if (i === 2) wakeRenders = 0;
+    }, d);
+  });
+}
+
 /* ============================== Press handling ============================== */
 
 function ensureAuthed(ctx) {
@@ -853,6 +941,7 @@ async function onNext(ctx) {
   try {
     await spotify.next();
     poll();
+    recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
     plugin.showAlert(ctx);
@@ -864,10 +953,32 @@ async function onPrevious(ctx) {
   try {
     await spotify.previous();
     poll();
+    recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
     plugin.showAlert(ctx);
   }
+}
+
+// Spotify switches tracks asynchronously: the poll() right after next/previous
+// often still returns the OLD track, and the next scheduled poll is 10s away —
+// the button would show stale info. Recheck a few times (1.5s apart) until the
+// new track appears. Bounded: max 5 extra polls per press, so quota is fine.
+let _skipRecheck = null;
+
+function recheckAfterSkip() {
+  const startId = state.track ? state.track.id : null;
+  let tries = 0;
+  if (_skipRecheck) clearTimeout(_skipRecheck);
+  const attempt = () => {
+    if (tries >= 5) return;
+    tries++;
+    poll().then(() => {
+      if (state.track && state.track.id !== startId) return; // switched — done
+      _skipRecheck = setTimeout(attempt, 1500);
+    });
+  };
+  _skipRecheck = setTimeout(attempt, 1500);
 }
 
 async function toggleLike(ctx) {
@@ -960,18 +1071,40 @@ async function toggleShuffle(ctx) {
 function seekByTicks(ctx, ticks, action) {
   if (!ensureAuthed(ctx)) return;
   if (!state.track || state.empty !== 'none') { plugin.showAlert(ctx); return; }
+  // Per-button state (one Action instance serves every seek encoder button):
+  // the accumulated target and the debounce timer must not bleed between buttons.
   const st = action._seek || (action._seek = {});
-  const base = st.target != null ? st.target : state.progressMs;
+  const s = st[ctx] || (st[ctx] = {});
+  if (!s.rotTrackId) s.rotTrackId = state.track.id; // track at the start of this rotation burst
+  const base = s.target != null ? s.target : state.progressMs;
   const target = clamp(base + ticks * 5000, 0, state.track.durationMs);
-  st.target = target;
+  s.target = target;
   // show the new position on the encoder display right away
   plugin.setTitle(ctx, fmtTime(target) + ' / ' + fmtTime(state.track.durationMs));
-  if (st.timer) clearTimeout(st.timer);
-  st.timer = setTimeout(() => {
-    st.timer = null;
-    st.target = null;
+  if (s.timer) clearTimeout(s.timer);
+  s.timer = setTimeout(() => {
+    s.timer = null;
+    s.target = null;
+    const rotTrack = s.rotTrackId;
+    s.rotTrackId = null;
+    // the track changed while the user was rotating — don't apply the old
+    // position to the new track (Spotify would seek the new track to it)
+    if (rotTrack && rotTrack !== state.track.id) {
+      log('[seek] track changed during rotation — skipping the seek');
+      return;
+    }
     state.progressMs = target;
-    spotify.seek(target).catch((e) => {
+    spotify.seek(target).then(() => {
+      // Spotify may apply the request to the NEXT track if the track changed
+      // while the request was in flight — jump it back to the beginning
+      if (rotTrack && rotTrack !== state.track.id) {
+        log('[seek] stale seek landed on', state.track.name, '— resetting to 0');
+        state.progressMs = 0;
+        spotify.seek(0).catch(() => {});
+      }
+      poll(); // resync progressMs with the real position
+    }).catch((e) => {
+      log('[seek] error:', e && e.message || e);
       if (e instanceof AuthError) onAuthFailure();
     });
   }, 120);
@@ -988,7 +1121,7 @@ function onAuthFailure() {
 /* ============================== Property Inspector ============================== */
 
 function pushAuthState() {
-  plugin.sendToPI({ type: 'auth', ...auth.publicState(), scopes: auth.scopes(), libraryError: state.library403, player: playerSummary() });
+  plugin.sendToPI({ type: 'auth', ...auth.publicState(), scopes: auth.scopes(), libraryError: state.library403, logEnabled, player: playerSummary() });
 }
 
 function pushState(ctx) {
@@ -1000,6 +1133,7 @@ function pushState(ctx) {
     ...auth.publicState(),
     scopes: auth.scopes(),
     libraryError: state.library403,
+    logEnabled,
     player: playerSummary()
   });
 }
@@ -1098,6 +1232,17 @@ function handlePiMessage(ctx, payload, action) {
         text = '(log file is still empty: ' + LOG_FILE + ')'
       }
       plugin.sendToPI({ type: 'log', text });
+      break;
+    }
+    case 'setLogEnabled': {
+      const v = !!(payload && payload.enabled);
+      logEnabled = v;
+      setEnabled(v);
+      // start with a clean file on every toggle, so the Log button
+      // doesn't show old lines from before
+      try { fs.truncateSync(LOG_FILE, 0); } catch (e) { /* ignore */ }
+      plugin.setGlobalSettings({ spotify: auth.toJSON(), logEnabled });
+      pushAuthState();
       break;
     }
     case 'settings': {

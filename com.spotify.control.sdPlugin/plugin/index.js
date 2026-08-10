@@ -7,7 +7,11 @@ const { SpotifyApi, AuthError } = require('./lib/spotify');
 const render = require('./lib/render');
 const { getBuffer, dataUrlFromBuffer, clamp, fmtTime } = require('./lib/util');
 const { averageLuminance } = require('./lib/luma');
-const { log, LOG_FILE } = require('./lib/log');
+const { log, LOG_FILE, setEnabled } = require('./lib/log');
+
+// «Писать лог» — настройка пользователя (по умолчанию ВЫКЛ). Когда выключено,
+// log() ничего не пишет — ноль ресурсов на логирование. Хранится в глобальных настройках.
+let logEnabled = false;
 
 log('Плагин запущен, argv:', process.argv);
 
@@ -105,7 +109,13 @@ class Plugin {
     }
     log('Сообщение от StreamDock:', data.event, data.action || '', pl !== undefined ? JSON.stringify(pl) : '');
     if (data.event === 'didReceiveGlobalSettings') {
-      const spot = (data.payload && data.payload.settings && data.payload.settings.spotify) || null;
+      const gs = (data.payload && data.payload.settings) || {};
+      const spot = gs.spotify || null;
+      // вкл/выкл лога — глобальная настройка пользователя (по умолчанию выкл)
+      if (typeof gs.logEnabled === 'boolean') {
+        logEnabled = gs.logEnabled;
+        setEnabled(logEnabled);
+      }
       // Файл плагина — источник истины (пишется синхронно при каждом изменении токенов),
       // а глобальные настройки StreamDock могут быть устаревшими. Берём их только если файла нет.
       if (!auth.hasToken() && spot) auth.fromJSON(spot);
@@ -137,12 +147,21 @@ class Plugin {
         if (action) action.receiveSettings(ctx, settings);
         break;
       case 'keyDown':
+        // Устройство могло погасить клавиши в простое — перерисовываем всё,
+        // чтобы вся панель вернулась уже по первому нажатию.
+        bumpAll();
         if (action) action.keyDown(ctx);
         break;
       case 'keyUp':
         if (action) action.keyUp(ctx);
         break;
       case 'dialRotate':
+        // То же, что и keyDown — перерисовываем всё (с дебаунсом: энкодер
+        // шлёт много тиков за один поворот) на случай простоя устройства.
+        if (Date.now() - lastDialBump > 2000) {
+          lastDialBump = Date.now();
+          bumpAll();
+        }
         if (action) action.dialRotate(ctx, (data.payload && data.payload.ticks) || 0);
         break;
       case 'dialDown':
@@ -173,7 +192,7 @@ const plugin = new Plugin();
 
 const auth = new Auth({
   onStateChange: () => {
-    plugin.setGlobalSettings({ spotify: auth.toJSON() });
+    plugin.setGlobalSettings({ spotify: auth.toJSON(), logEnabled });
   },
   openUrl: (url) => plugin.openUrl(url)
 });
@@ -206,6 +225,7 @@ const state = {
   volume: null,       // 0..100, громкость активного устройства (из /me/player)
   deviceId: null,     // id активного устройства (нужен для /volume)
   lastPoll: 0,
+  endPollId: null, // id трека, для которого уже отправлен опрос в конце трека
   _lastTick: 0
 };
 
@@ -427,12 +447,12 @@ class TrackEncoderAction extends Action {
   dialRotate(ctx, ticks) {
     if (!ensureAuthed(ctx)) return;
     if (ticks > 0) {
-      spotify.next().then(() => poll()).catch((e) => {
+      spotify.next().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
         if (e instanceof AuthError) onAuthFailure();
         plugin.showAlert(ctx);
       });
     } else if (ticks < 0) {
-      spotify.previous().then(() => poll()).catch((e) => {
+      spotify.previous().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
         if (e instanceof AuthError) onAuthFailure();
         plugin.showAlert(ctx);
       });
@@ -503,15 +523,19 @@ for (const name of Object.keys(actions)) plugin.actions[name] = actions[name];
 const coverCache = new Map();    // url -> dataUrl
 const coverLuma = new Map();     // url -> средняя яркость нижней части (0..255) или null
 const coverLoading = new Map();  // url -> Promise
+const coverFailed = new Map();   // url -> время последней ошибки (повтор через 5 мин)
 
 function ensureCover(url) {
   if (!url) return Promise.resolve(null);
   if (coverCache.has(url)) return Promise.resolve(coverCache.get(url));
+  const failedAt = coverFailed.get(url);
+  if (failedAt && Date.now() - failedAt < 300000) return Promise.resolve(null);
   if (coverLoading.has(url)) return coverLoading.get(url);
   const p = getBuffer(url)
     .then((r) => {
       const d = dataUrlFromBuffer(r.buffer, r.contentType);
       coverCache.set(url, d);
+      coverFailed.delete(url);
       // Яркость для авто-контраста текста (чёрный/белый по обложке)
       try { coverLuma.set(url, averageLuminance(r.buffer)); } catch (e) { coverLuma.set(url, null); }
       while (coverCache.size > 12) {
@@ -523,8 +547,10 @@ function ensureCover(url) {
       renderAll(true); // обложка загружена — перерисовать (и цвет текста тоже)
       return d;
     })
-    .catch(() => {
+    .catch((e) => {
       coverLoading.delete(url);
+      coverFailed.set(url, Date.now());
+      log('[cover] ошибка загрузки:', e && e.message || e);
       return null;
     });
   coverLoading.set(url, p);
@@ -628,11 +654,15 @@ function renderAll(force) {
 /* ============================== Опрос Spotify ============================== */
 
 let polling = false;
+// Рейт-лимит Spotify (429): после попадания не опрашиваем API какое-то время,
+// чтобы квота успела сброситься — долбёжка во время 429 только держит лимит.
+let nextPollAt = 0;
 
 async function poll() {
   if (!auth.hasToken()) return;
   if (polling) return;
   polling = true;
+  nextPollAt = 0;
   try {
     const res = await spotify.getPlayer();
     if (res.status === 200 && res.data && res.data.item && res.data.item.type === 'track') {
@@ -673,6 +703,9 @@ async function poll() {
         state.empty = 'nodevice';
         renderAll(true);
       }
+    } else if (res.status === 429) {
+      log('[poll] 429 rate limit — backing off for 30s');
+      nextPollAt = Date.now() + 30000;
     } else if (res.status === 403) {
       if (state.empty !== 'premium') { state.empty = 'premium'; renderAll(true); }
     } else if (res.status === 401) {
@@ -750,8 +783,25 @@ async function doRefreshLike() {
 
 let _summaryAt = 0;
 
+function pollInterval() {
+  // Пока музыка играет — опрашиваем каждые 10 сек (смена трека, громкость
+  // с других устройств, статус лайка). На паузе следить не за чем —
+  // опрашиваем каждые 60 сек, чтобы почти не тратить дневную квоту dev-режима.
+  // Опрос в конце трека (ниже) срабатывает в момент окончания, поэтому
+  // информация о следующем треке всё равно появляется сразу, несмотря на 10 сек.
+  return (state.isPlaying && state.track) ? 10000 : 60000;
+}
+
 function tick() {
   const now = Date.now();
+  // Компьютер был в сне (или приложение/устройство надолго зависло): устройство
+  // могло погасить клавиши или переподключиться. Заново отправляем все картинки
+  // с парой повторов — приложение может в этот момент ещё переподключать устройство.
+  const lastTick = state._lastTick || now;
+  if (now - lastTick > 15000) {
+    log('[wake] разрыв ' + Math.round((now - lastTick) / 1000) + 'с — перерисовываю все кнопки');
+    bumpAllDelayed();
+  }
   // Периодическая сводка состояния — чтобы по логу было видно, что плагин видит
   // (трек, громкость, лайк, права токена) без кучи отдельных строк.
   if (now - _summaryAt > 30000) {
@@ -770,9 +820,20 @@ function tick() {
         return parts.join(' ') || (a.name + '=—');
       }).join(' | '));
   }
-  if (now - state.lastPoll > 2500) poll();
+  if (now >= nextPollAt && now - state.lastPoll > pollInterval()) poll();
   if (state.empty === 'none' && state.isPlaying && state.track) {
     state.progressMs = Math.min(state.track.durationMs, state.progressMs + (now - (state._lastTick || now)));
+  }
+  // Текущий трек вот-вот закончится (локальная оценка) — опрашиваем сразу,
+  // чтобы информация о следующем треке (название, обложка, лайк) появилась
+  // мгновенно, а не через 10 сек. Один раз на трек: маркер защищает от
+  // повторных запросов, если запрос не прошёл и прогресс застрял на конце.
+  if (state.empty === 'none' && state.isPlaying && state.track &&
+      state.track.durationMs - state.progressMs <= 1000 &&
+      now >= nextPollAt &&
+      state.endPollId !== state.track.id) {
+    state.endPollId = state.track.id;
+    poll();
   }
   // Лайк: если статус ещё не известен (или первый запрос не прошёл) — пробуем снова
   if (state.track && !state.likedKnown && now > state.likeRetryAt && now > (state.like403At || 0)) {
@@ -822,6 +883,33 @@ setTimeout(poll, 500);
   rearm();
 }
 
+// Перерисовываем все кнопки в обход дедупликации по сигнатуре, чтобы картинки
+// реально ушли на устройство заново. Используется после «пробуждения» и по
+// нажатию кнопки/повороту энкодера (устройство могло погасить клавиши в
+// простое) — но НЕ по таймеру: поток картинок во время простоя приводил к
+// тому, что устройство переставало реагировать вообще на всё до перезапуска.
+let wakeRenders = 0;
+let lastDialBump = 0;
+function bumpAll() {
+  for (const name of Object.keys(actions)) {
+    actions[name].icons.clear();
+    actions[name].sig.clear();
+  }
+  renderAll(true);
+}
+// После выхода из сна устройство может переподключаться с задержкой —
+// отправляем картинки несколько раз с небольшими интервалами.
+function bumpAllDelayed() {
+  if (wakeRenders) return;
+  wakeRenders = 1;
+  [0, 1500, 4000].forEach((d, i) => {
+    setTimeout(() => {
+      bumpAll();
+      if (i === 2) wakeRenders = 0;
+    }, d);
+  });
+}
+
 /* ============================== Обработка нажатий ============================== */
 
 function ensureAuthed(ctx) {
@@ -853,6 +941,7 @@ async function onNext(ctx) {
   try {
     await spotify.next();
     poll();
+    recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
     plugin.showAlert(ctx);
@@ -864,10 +953,32 @@ async function onPrevious(ctx) {
   try {
     await spotify.previous();
     poll();
+    recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
     plugin.showAlert(ctx);
   }
+}
+
+// Spotify переключает трек асинхронно: poll() сразу после next/previous часто
+// ещё возвращает СТАРЫЙ трек, а следующий плановый опрос — через 10 сек.
+// Перепроверяем несколько раз (с интервалом 1.5 сек), пока не увидим новый
+// трек. Ограничено: максимум 5 лишних опросов на нажатие, квоту не жжёт.
+let _skipRecheck = null;
+
+function recheckAfterSkip() {
+  const startId = state.track ? state.track.id : null;
+  let tries = 0;
+  if (_skipRecheck) clearTimeout(_skipRecheck);
+  const attempt = () => {
+    if (tries >= 5) return;
+    tries++;
+    poll().then(() => {
+      if (state.track && state.track.id !== startId) return; // переключился — готово
+      _skipRecheck = setTimeout(attempt, 1500);
+    });
+  };
+  _skipRecheck = setTimeout(attempt, 1500);
 }
 
 async function toggleLike(ctx) {
@@ -960,18 +1071,41 @@ async function toggleShuffle(ctx) {
 function seekByTicks(ctx, ticks, action) {
   if (!ensureAuthed(ctx)) return;
   if (!state.track || state.empty !== 'none') { plugin.showAlert(ctx); return; }
+  // Состояние на каждую кнопку (один экземпляр действия обслуживает все
+  // кнопки энкодера перемотки): накопленный таргет и таймер дебаунса
+  // не должны смешиваться между кнопками.
   const st = action._seek || (action._seek = {});
-  const base = st.target != null ? st.target : state.progressMs;
+  const s = st[ctx] || (st[ctx] = {});
+  if (!s.rotTrackId) s.rotTrackId = state.track.id; // трек на старте серии вращений
+  const base = s.target != null ? s.target : state.progressMs;
   const target = clamp(base + ticks * 5000, 0, state.track.durationMs);
-  st.target = target;
+  s.target = target;
   // сразу показываем новую позицию на дисплее энкодера
   plugin.setTitle(ctx, fmtTime(target) + ' / ' + fmtTime(state.track.durationMs));
-  if (st.timer) clearTimeout(st.timer);
-  st.timer = setTimeout(() => {
-    st.timer = null;
-    st.target = null;
+  if (s.timer) clearTimeout(s.timer);
+  s.timer = setTimeout(() => {
+    s.timer = null;
+    s.target = null;
+    const rotTrack = s.rotTrackId;
+    s.rotTrackId = null;
+    // трек сменился, пока пользователь крутил — не применяем старую позицию
+    // к новому треку (Spotify перемотал бы новый трек на неё)
+    if (rotTrack && rotTrack !== state.track.id) {
+      log('[seek] трек сменился во время вращения — перемотку пропускаем');
+      return;
+    }
     state.progressMs = target;
-    spotify.seek(target).catch((e) => {
+    spotify.seek(target).then(() => {
+      // если трек сменился, пока запрос летел, Spotify мог применить его
+      // к новому треку — откатываем новый трек в начало
+      if (rotTrack && rotTrack !== state.track.id) {
+        log('[seek] запоздавший seek применился к', state.track.name, '— сбрасываем в 0');
+        state.progressMs = 0;
+        spotify.seek(0).catch(() => {});
+      }
+      poll(); // синхронизируем progressMs с реальной позицией
+    }).catch((e) => {
+      log('[seek] error:', e && e.message || e);
       if (e instanceof AuthError) onAuthFailure();
     });
   }, 120);
@@ -988,7 +1122,7 @@ function onAuthFailure() {
 /* ============================== Property Inspector ============================== */
 
 function pushAuthState() {
-  plugin.sendToPI({ type: 'auth', ...auth.publicState(), scopes: auth.scopes(), libraryError: state.library403, player: playerSummary() });
+  plugin.sendToPI({ type: 'auth', ...auth.publicState(), scopes: auth.scopes(), libraryError: state.library403, logEnabled, player: playerSummary() });
 }
 
 function pushState(ctx) {
@@ -1000,6 +1134,7 @@ function pushState(ctx) {
     ...auth.publicState(),
     scopes: auth.scopes(),
     libraryError: state.library403,
+    logEnabled,
     player: playerSummary()
   });
 }
@@ -1098,6 +1233,17 @@ function handlePiMessage(ctx, payload, action) {
         text = '(файл лога пока пуст: ' + LOG_FILE + ')';
       }
       plugin.sendToPI({ type: 'log', text });
+      break;
+    }
+    case 'setLogEnabled': {
+      const v = !!(payload && payload.enabled);
+      logEnabled = v;
+      setEnabled(v);
+      // при каждом переключении начинаем с чистого файла,
+      // чтобы кнопка «Лог» не показывала старые строки
+      try { fs.truncateSync(LOG_FILE, 0); } catch (e) { /* ignore */ }
+      plugin.setGlobalSettings({ spotify: auth.toJSON(), logEnabled });
+      pushAuthState();
       break;
     }
     case 'settings': {

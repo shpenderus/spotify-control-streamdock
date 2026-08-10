@@ -38,17 +38,22 @@ function svgDataUrl(svg) {
 }
 
 // GET с редиректами, возвращает { buffer, contentType }
-function getBuffer(url, redirects) {
+function getBuffer(url, redirects, viaV4) {
   redirects = redirects || 0;
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const client = parsed.protocol === 'https:' ? https : http;
-    const req = client.get({
+    const opts = {
       hostname: parsed.hostname,
       port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
       path: parsed.pathname + parsed.search,
       headers: { 'User-Agent': 'Spotify-Control-StreamDock/1.0' }
-    }, (res) => {
+    };
+    // На некоторых сетях IPv6 не работает: DNS отдаёт IPv6-адрес первым, Node
+    // пробует его, и TLS-рукопожатие сбрасывается (ECONNRESET) — обложки
+    // никогда не грузятся. Повторяем один раз через IPv4 — он работает.
+    if (viaV4) opts.family = 4;
+    const req = client.get(opts, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects < 4) {
         res.resume();
         resolve(getBuffer(new URL(res.headers.location, url).toString(), redirects + 1));
@@ -67,7 +72,13 @@ function getBuffer(url, redirects) {
       }));
       res.on('error', reject);
     });
-    req.on('error', reject);
+    req.on('error', (e) => {
+      if (!viaV4 && /^(ECONNRESET|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ECONNREFUSED)$/.test(e.code || '')) {
+        resolve(getBuffer(url, redirects, true));
+        return;
+      }
+      reject(e);
+    });
     req.setTimeout(15000, () => req.destroy(new Error('Таймаут запроса')));
   });
 }

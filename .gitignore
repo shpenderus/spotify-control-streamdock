@@ -20,3 +20,6 @@ npm-debug.log*
 
 # Freebuff tool internals
 .freebuff/
+
+# Other local plugins (not part of this repo)
+com.tvremote.control.sdPlugin/

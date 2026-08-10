@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue.svg)](#)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](#)
-[![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/version-1.0.1-orange.svg)](#)
 
 **Русская версия** · [English variant](com.spotify.control.en.sdPlugin/README.md)
 
@@ -61,18 +61,12 @@
 
 ## 📂 Структура репозитория
 
-| Папка | Язык | ID плагина |
-| --- | --- | --- |
-| `com.spotify.control.sdPlugin` | Русский | `com.spotify.control` |
-| `com.spotify.control.en.sdPlugin` | English | `com.spotify.control` |
+| Папка | Язык |
+| --- | --- |
+| `com.spotify.control.sdPlugin` | Русский |
+| `com.spotify.control.en.sdPlugin` | English |
 
-Обе версии одинаковы по функциям и отличаются только языком. ID плагина у них общий — **устанавливайте только одну из них одновременно**. Подробные инструкции — в README каждой версии.
-
-## 🛠 Требования
-
-- Софт **StreamDock** 3.10.188.226 или новее (встроенный Node.js 20)
-- Бесплатное приложение Spotify (Client ID / Client Secret)
-- **Spotify Premium** для управления воспроизведением (плей/пауза, перемотка, громкость). Лайки по документации эндпоинтов библиотеки Premium не требуют, но на главной странице Web API Spotify есть общее примечание о необходимости Premium — на бесплатном тарифе они официально не гарантированы.
+Обе версии одинаковы по функциям и отличаются только языком.
 
 ## 📄 Лицензия
 
