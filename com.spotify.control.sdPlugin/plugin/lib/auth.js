@@ -39,6 +39,8 @@ class Auth {
     this.account = null;
     this.grantedScopes = null; // права, которые вернул сам Spotify в ответе токена (самый надёжный источник)
     this.filePath = path.join(os.homedir(), FILE_NAME);
+    this._serverPromise = null;
+    this._serverReject = null;
     this.loadFile();
   }
 
@@ -173,8 +175,10 @@ class Auth {
 
     let ru;
     try { ru = new URL(this.redirectUri); } catch (e) { throw new Error('Некорректный Redirect URI'); }
-    if (!/^127\.0\.0\.1$|^localhost$|^\[::1\]$/.test(ru.hostname)) {
-      throw new Error('Redirect URI должен указывать на 127.0.0.1 (локальный сервер)');
+    // Сервер слушает только 127.0.0.1 — localhost/[::1] не принимаем:
+    // браузер может стучаться в IPv6 и получить connection refused.
+    if (!/^127\.0\.0\.1$/.test(ru.hostname)) {
+      throw new Error('Redirect URI должен указывать на 127.0.0.1 (локальный сервер). localhost не поддерживается — используйте 127.0.0.1.');
     }
     const port = parseInt(ru.port || '80', 10);
     const callbackPath = ru.pathname || '/';
@@ -182,10 +186,12 @@ class Auth {
 
     this._stopLoginServer();
     this._serverPromise = new Promise((resolve, reject) => {
+      this._serverReject = reject;
       let settled = false;
       const finish = (fn, value) => {
         if (settled) return;
         settled = true;
+        this._serverReject = null;
         if (this._serverTimeout) { clearTimeout(this._serverTimeout); this._serverTimeout = null; }
         try { if (this._server) this._server.close(); } catch (e) { /* ignore */ }
         this._server = null;
@@ -238,7 +244,12 @@ class Auth {
   _stopLoginServer() {
     if (this._server) { try { this._server.close(); } catch (e) { /* ignore */ } this._server = null; }
     if (this._serverTimeout) { clearTimeout(this._serverTimeout); this._serverTimeout = null; }
+    // Если предыдущий вход ещё ждал код — завершаем его ошибкой, иначе он
+    // завис бы навсегда после повторного клика «Войти».
+    const reject = this._serverReject;
+    this._serverReject = null;
     this._serverPromise = null;
+    if (reject) reject(new Error('Авторизация отменена — начата новая'));
   }
 
   // Шаг 2: ждать, пока Spotify вернёт код на локальный сервер
@@ -274,4 +285,4 @@ class Auth {
   }
 }
 
-module.exports = { Auth, DEFAULT_REDIRECT };
+module.exports = { Auth };

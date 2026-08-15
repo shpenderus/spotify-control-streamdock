@@ -103,6 +103,7 @@ class Plugin {
         if (spot) {
           if (spot.accessToken) spot.accessToken = '***';
           if (spot.refreshToken) spot.refreshToken = '***';
+          if (spot.clientSecret) spot.clientSecret = '***';
         }
         pl = copy;
       } catch (e) { /* ignore */ }
@@ -214,6 +215,7 @@ const state = {
   track: null,     // { id, name, artists, durationMs, cover, coverSmall, uri }
   isPlaying: false,
   progressMs: 0,
+  progressAt: 0,   // when progressMs was last received from the server (for accurate local increments)
   repeat: 'off',
   shuffle: false,
   liked: false,
@@ -225,6 +227,7 @@ const state = {
   volume: null,       // 0..100, active device volume (from /me/player)
   deviceId: null,     // active device id (needed for /volume)
   lastPoll: 0,
+  lastPollOk: 0, // when a poll last SUCCESSFULLY updated the state (not a network failure)
   endPollId: null, // track id we already fired the end-of-track poll for
   _lastTick: 0
 };
@@ -245,6 +248,11 @@ function loadLikeCache() {
 
 function saveLikeCache() {
   try {
+    // The cache must not grow forever (one entry per checked track)
+    const keys = Object.keys(state.likedCache);
+    if (keys.length > 200) {
+      for (let i = 0; i < keys.length - 200; i++) delete state.likedCache[keys[i]];
+    }
     fs.writeFileSync(LIKE_CACHE_FILE, JSON.stringify(state.likedCache));
   } catch (e) { /* ignore */ }
 }
@@ -446,17 +454,24 @@ class TrackEncoderAction extends Action {
 
   dialRotate(ctx, ticks) {
     if (!ensureAuthed(ctx)) return;
-    if (ticks > 0) {
-      spotify.next().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
+    // A burst of fast ticks from one turn is merged into ONE track switch
+    // (in the direction of the net ticks), like volume and seek do. Otherwise
+    // a single turn used to skip 3–5 tracks.
+    const all = this._track || (this._track = {});
+    const s = all[ctx] || (all[ctx] = {});
+    s.net = (s.net || 0) + ticks;
+    if (s.timer) clearTimeout(s.timer);
+    s.timer = setTimeout(() => {
+      s.timer = null;
+      const net = s.net;
+      s.net = 0;
+      if (net === 0) return;
+      const fn = net > 0 ? () => spotify.next() : () => spotify.previous();
+      fn().then(() => { safePoll(); recheckAfterSkip(); }).catch((e) => {
         if (e instanceof AuthError) onAuthFailure();
         plugin.showAlert(ctx);
       });
-    } else if (ticks < 0) {
-      spotify.previous().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
-        if (e instanceof AuthError) onAuthFailure();
-        plugin.showAlert(ctx);
-      });
-    }
+    }, 120);
   }
 }
 
@@ -485,10 +500,26 @@ class VolumeEncoderAction extends Action {
 
   dialRotate(ctx, ticks) {
     if (!ensureAuthed(ctx)) return;
-    if (state.volume == null) { plugin.showAlert(ctx); return; }
-    const st = this._vol || (this._vol = {});
+    // Rotation-burst state is per BUTTON (st[ctx]), like seek: a single shared
+    // object made two volume encoders fight over the same target/timer.
+    const all = this._vol || (this._vol = {});
+    const st = all[ctx] || (all[ctx] = {});
+    if (state.volume == null) {
+      // Alert at most once per 2 seconds (otherwise spam on every tick).
+      if (!st.alertAt || Date.now() - st.alertAt > 2000) {
+        st.alertAt = Date.now();
+        plugin.showAlert(ctx);
+      }
+      return;
+    }
     const base = st.target != null ? st.target : state.volume;
-    const target = clamp(base + ticks * 2, 0, 100);
+    // Cap one event's step at 10%: on some devices the first event after idle
+    // carries a large ticks value (the same bug as with seek), and without a
+    // cap a single notch would jump 40%+.
+    const rawDelta = ticks * 2;
+    const delta = clamp(rawDelta, -10, 10);
+    if (delta !== rawDelta) log('[volume] large ticks =', ticks, '— step limited to 10%');
+    const target = clamp(base + delta, 0, 100);
     st.target = target;
     // show the new value on the encoder display right away
     plugin.setTitle(ctx, 'Volume ' + Math.round(target) + '%');
@@ -550,6 +581,10 @@ function ensureCover(url) {
     .catch((e) => {
       coverLoading.delete(url);
       coverFailed.set(url, Date.now());
+      if (coverFailed.size > 50) {
+        const k = coverFailed.keys().next().value;
+        coverFailed.delete(k);
+      }
       log('[cover] fetch failed:', e && e.message || e);
       return null;
     });
@@ -682,6 +717,8 @@ async function poll() {
       state.track = track;
       state.isPlaying = !!d.is_playing;
       state.progressMs = d.progress_ms || 0;
+      state.progressAt = Date.now();
+      state.lastPollOk = Date.now();
       state.repeat = d.repeat_state || 'off';
       state.shuffle = !!d.shuffle_state;
       state.volume = (d.device && typeof d.device.volume_percent === 'number') ? d.device.volume_percent : state.volume;
@@ -697,10 +734,27 @@ async function poll() {
       }
       renderAll(changed);
     } else if (res.status === 204 || (res.status === 200 && !res.data.item)) {
-      if (state.track || state.empty !== 'nodevice') {
+      if (state.track || state.empty !== 'nodevice' || state.likedKnown) {
         state.track = null;
         state.isPlaying = false;
         state.empty = 'nodevice';
+        state.liked = false;
+        state.likedKnown = false;
+        state.lastPollOk = Date.now();
+        renderAll(true);
+      }
+    } else if (res.status === 200 && res.data && res.data.item) {
+      // Podcast, episode or ad — not a track: there is no track info to show.
+      // The state used to get stuck on the previous song (the button "lied"
+      // for the whole episode).
+      const playing = !!res.data.is_playing;
+      if (state.track || state.empty !== 'notrack' || state.isPlaying !== playing || state.likedKnown) {
+        state.track = null;
+        state.isPlaying = playing;
+        state.empty = 'notrack';
+        state.liked = false;
+        state.likedKnown = false;
+        state.lastPollOk = Date.now();
         renderAll(true);
       }
     } else if (res.status === 429) {
@@ -729,6 +783,15 @@ async function poll() {
   }
 }
 
+// Polling that respects the 429 backoff: action handlers used to call poll()
+// directly, resetting nextPollAt and hammering the API during a rate limit.
+// safePoll() skips the poll while a 429 pause is active.
+function safePoll() {
+  if (Date.now() < nextPollAt) return Promise.resolve(false);
+  const p = poll();
+  return p || Promise.resolve(false);
+}
+
 // Serialization: all status requests go through a promise chain so that two
 // requests never run at the same time. A race used to let one return 200 and
 // the other 403, overwriting the state AFTER success (the button showed "not
@@ -748,13 +811,20 @@ async function doRefreshLike() {
     let res = state.likeLegacy
       ? await spotify.isLikedLegacy(state.track.id)
       : await spotify.isLiked(state.track.id);
-    // Error on the modern /v1/me/tracks/contains — try the legacy /v1/me/library/contains
-    // (like the official MiraBox plugin): on some accounts only the legacy endpoints
-    // work (403/400 on the new ones even with the scopes in place).
-    // After the first success through the legacy endpoint, remember it and use it directly.
-    if (!(res.status >= 200 && res.status < 300) && !state.likeLegacy) {
-      log('[like] ' + res.status + ' on /me/tracks/contains, trying /me/library/contains');
-      try { res = await spotify.isLikedLegacy(state.track.id); } catch (e2) { /* handled below */ }
+    // Non-2xx on the current endpoint — try the other one (modern
+    // /v1/me/tracks/contains or legacy /v1/me/library/contains, like the
+    // official MiraBox plugin): on some accounts only the legacy endpoints
+    // work (403/400 on the new ones even with the scopes in place), and vice
+    // versa. Remember whichever actually worked so we don't keep hitting a dead one.
+    if (!(res.status >= 200 && res.status < 300)) {
+      log('[like] ' + res.status + ' on ' + (state.likeLegacy ? '/me/library/contains' : '/me/tracks/contains') + ', trying the other endpoint');
+      try {
+        const alt = state.likeLegacy
+          ? await spotify.isLiked(state.track.id)
+          : await spotify.isLikedLegacy(state.track.id);
+        res = alt;
+        if (alt.status >= 200 && alt.status < 300) state.likeLegacy = !state.likeLegacy;
+      } catch (e2) { /* handled below */ }
     }
     log('[like] response:', res.status, JSON.stringify(res.data));
     if (res.status === 200) {
@@ -763,7 +833,6 @@ async function doRefreshLike() {
       state.likedKnown = true;
       state.library403 = false;
       state.like403At = 0;
-      state.likeLegacy = true; // legacy endpoint worked — use it from now on
       state.likedCache[state.track.id] = state.liked;
       saveLikeCache();
       renderLikeAll();
@@ -822,7 +891,12 @@ function tick() {
   }
   if (now >= nextPollAt && now - state.lastPoll > pollInterval()) poll();
   if (state.empty === 'none' && state.isPlaying && state.track) {
-    state.progressMs = Math.min(state.track.durationMs, state.progressMs + (now - (state._lastTick || now)));
+    // Accurate local increment: count from the moment progressMs was received
+    // from the server, not from the end of the previous tick (that used to
+    // push the position up to ~1s ahead).
+    const base = state.progressAt || now;
+    state.progressMs = Math.min(state.track.durationMs, state.progressMs + (now - base));
+    state.progressAt = now;
   }
   // The current track is about to end (local estimate) — poll right away so
   // the next track's info (title, cover, like) appears immediately instead
@@ -931,16 +1005,19 @@ async function togglePlayPause(ctx) {
       await spotify.setPlay(true);
     }
   } catch (e) {
-    if (e instanceof AuthError) onAuthFailure();
+    if (e instanceof AuthError) { onAuthFailure(); return; }
+    // Non-AuthError (403 without Premium, 404, network) — show the error;
+    // the press used to fail silently.
+    plugin.showAlert(ctx);
   }
-  poll();
+  safePoll();
 }
 
 async function onNext(ctx) {
   if (!ensureAuthed(ctx)) return;
   try {
     await spotify.next();
-    poll();
+    safePoll();
     recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
@@ -952,7 +1029,7 @@ async function onPrevious(ctx) {
   if (!ensureAuthed(ctx)) return;
   try {
     await spotify.previous();
-    poll();
+    safePoll();
     recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
@@ -973,7 +1050,7 @@ function recheckAfterSkip() {
   const attempt = () => {
     if (tries >= 5) return;
     tries++;
-    poll().then(() => {
+    safePoll().then(() => {
       if (state.track && state.track.id !== startId) return; // switched — done
       _skipRecheck = setTimeout(attempt, 1500);
     });
@@ -1001,13 +1078,19 @@ async function toggleLike(ctx) {
     let res = state.likeLegacy
       ? await spotify.setLikedLegacy(state.track.id, target)
       : await spotify.setLiked(state.track.id, target);
-    // Error on the modern /v1/me/tracks — try the legacy /v1/me/library (like the official plugin).
-    if (!(res.status >= 200 && res.status < 300) && !state.likeLegacy) {
-      log('[like] set ' + res.status + ' on /me/tracks, trying /me/library');
-      try { res = await spotify.setLikedLegacy(state.track.id, target); } catch (e2) { /* handled below */ }
+    // Non-2xx on the current endpoint — try the other one (like the official
+    // MiraBox plugin) and remember whichever actually worked.
+    if (!(res.status >= 200 && res.status < 300)) {
+      log('[like] set ' + res.status + ' on ' + (state.likeLegacy ? '/me/library' : '/me/tracks') + ', trying the other endpoint');
+      try {
+        const alt = state.likeLegacy
+          ? await spotify.setLiked(state.track.id, target)
+          : await spotify.setLikedLegacy(state.track.id, target);
+        res = alt;
+        if (alt.status >= 200 && alt.status < 300) state.likeLegacy = !state.likeLegacy;
+      } catch (e2) { /* handled below */ }
     }
     if (res.status >= 200 && res.status < 300) {
-      state.likeLegacy = true;
       state.likedCache[state.track.id] = target;
       saveLikeCache();
       // Confirm the real status so the button always matches the track
@@ -1043,12 +1126,16 @@ async function cycleRepeat(ctx) {
   const order = ['off', 'track', 'context'];
   const idx = order.indexOf(state.repeat);
   const next = order[(idx + 1) % order.length];
+  const prev = state.repeat;
   state.repeat = next;
   renderRepeatAll();
   try {
     await spotify.setRepeat(next);
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
+    // API error — roll the icon back so the button doesn't "lie" until the next poll.
+    state.repeat = prev;
+    renderRepeatAll();
     plugin.showAlert(ctx);
   }
 }
@@ -1056,28 +1143,110 @@ async function cycleRepeat(ctx) {
 async function toggleShuffle(ctx) {
   if (!ensureAuthed(ctx)) return;
   const target = !state.shuffle;
+  const prev = state.shuffle;
   state.shuffle = target;
   renderShuffleAll();
   try {
     await spotify.setShuffle(target);
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
+    state.shuffle = prev;
+    renderShuffleAll();
     plugin.showAlert(ctx);
   }
 }
 
 // Encoder seek: each tick = 5 seconds (like the reference plugin).
 // Fast ticks accumulate and flush as one request after 120 ms.
-function seekByTicks(ctx, ticks, action) {
+// Encoder seek. A burst of ticks is buffered and applied with ONE seek request
+// after a pause in rotation (SEEK_BURST_MS). EVERY new rotation series starts
+// with a fresh poll: the position kept in state may belong to the PREVIOUS
+// track (the track just changed via next/playlist and the poll hasn't caught
+// up), and a seek based on it used to throw the new track half-way. Plus:
+//   * one event's step is capped at 30 s — a single "noisy" event cannot jump
+//     far, while continuous rotation keeps accumulating;
+//   * NO immediate poll after a seek — it could return a position captured
+//     before the seek landed and roll the progress back (the "lag" backward
+//     jumps when rotating forward only). The scheduled poll re-anchors.
+const SEEK_BURST_MS = 300;      // tick accumulation window, ms
+const SEEK_MAX_STEP_MS = 30000; // max seek per single event, ms
+
+// A fresh poll before a rotation series: wait for the current poll (if running,
+// at most 3 s) or start a new one. Resolves true only if the poll really
+// delivered fresh data (lastPollOk moved), not a network/429 failure. During
+// an active 429 backoff the burst is skipped — the base may be from an old track.
+function ensureFreshPoll() {
+  const before = state.lastPollOk;
+  const finish = () => state.lastPollOk > before;
+  if (polling) {
+    // a poll is already running — wait for its result
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const iv = setInterval(() => {
+        if (!polling || Date.now() - started > 3000) {
+          clearInterval(iv);
+          resolve(finish());
+        }
+      }, 100);
+    });
+  }
+  if (Date.now() < nextPollAt) {
+    // 429 backoff: no fresh poll possible and the base may belong to the
+    // previous track (the track changed while polls were blocked) — never seek
+    // blind, skip the burst; the next rotation retries after the pause.
+    return Promise.resolve(false);
+  }
+  const p = poll();
+  return p ? p.then(finish) : Promise.resolve(finish());
+}
+
+async function seekByTicks(ctx, ticks, action) {
   if (!ensureAuthed(ctx)) return;
-  if (!state.track || state.empty !== 'none') { plugin.showAlert(ctx); return; }
   // Per-button state (one Action instance serves every seek encoder button):
   // the accumulated target and the debounce timer must not bleed between buttons.
   const st = action._seek || (action._seek = {});
   const s = st[ctx] || (st[ctx] = {});
-  if (!s.rotTrackId) s.rotTrackId = state.track.id; // track at the start of this rotation burst
+  if (!state.track || state.empty !== 'none') {
+    // Don't spam alerts on every tick — at most once per 2 seconds.
+    if (!s.alertAt || Date.now() - s.alertAt > 2000) {
+      s.alertAt = Date.now();
+      plugin.showAlert(ctx);
+    }
+    return;
+  }
+  if (!s.rotTrackId) {
+    // New rotation series: the base must come from the CURRENT track. Buffer
+    // the ticks while a fresh poll runs, then apply once.
+    s.rotTrackId = state.track.id;
+    s.awaiting = true;
+    s.pendingTicks = (s.pendingTicks || 0) + ticks;
+    ensureFreshPoll().then((ok) => {
+      s.awaiting = false;
+      const t = s.pendingTicks;
+      s.pendingTicks = 0;
+      if (!ok || !state.track || state.empty !== 'none') {
+        // No fresh data (network/429/poll running) — never seek blind; the
+        // next rotation will retry.
+        s.rotTrackId = null;
+        return;
+      }
+      s.rotTrackId = state.track.id; // anchor to the actual current track
+      if (t !== 0) accumulateSeek(ctx, s, t);
+    }).catch(() => { s.awaiting = false; s.rotTrackId = null; });
+    return;
+  }
+  if (s.awaiting) { s.pendingTicks = (s.pendingTicks || 0) + ticks; return; }
+  accumulateSeek(ctx, s, ticks);
+}
+
+function accumulateSeek(ctx, s, ticks) {
   const base = s.target != null ? s.target : state.progressMs;
-  const target = clamp(base + ticks * 5000, 0, state.track.durationMs);
+  const rawDelta = ticks * 5000;
+  const delta = clamp(rawDelta, -SEEK_MAX_STEP_MS, SEEK_MAX_STEP_MS);
+  if (delta !== rawDelta) {
+    log('[seek] large ticks =', ticks, '— step limited to', SEEK_MAX_STEP_MS / 1000 + 's');
+  }
+  const target = clamp(base + delta, 0, state.track.durationMs);
   s.target = target;
   // show the new position on the encoder display right away
   plugin.setTitle(ctx, fmtTime(target) + ' / ' + fmtTime(state.track.durationMs));
@@ -1093,21 +1262,31 @@ function seekByTicks(ctx, ticks, action) {
       log('[seek] track changed during rotation — skipping the seek');
       return;
     }
+    const prevProgress = state.progressMs;
     state.progressMs = target;
+    state.progressAt = Date.now();
     spotify.seek(target).then(() => {
       // Spotify may apply the request to the NEXT track if the track changed
       // while the request was in flight — jump it back to the beginning
       if (rotTrack && rotTrack !== state.track.id) {
         log('[seek] stale seek landed on', state.track.name, '— resetting to 0');
         state.progressMs = 0;
+        state.progressAt = Date.now();
         spotify.seek(0).catch(() => {});
       }
-      poll(); // resync progressMs with the real position
+      // No immediate poll here: it could return a position captured before the
+      // seek landed and roll the progress back (the "lag" backward jumps).
     }).catch((e) => {
       log('[seek] error:', e && e.message || e);
-      if (e instanceof AuthError) onAuthFailure();
+      if (e instanceof AuthError) { onAuthFailure(); return; }
+      // The seek did not apply (404 no device, etc.) — restore the real
+      // position so the progress bar doesn't "lie" until the scheduled poll.
+      if (rotTrack && rotTrack === state.track.id) {
+        state.progressMs = prevProgress;
+        state.progressAt = Date.now();
+      }
     });
-  }, 120);
+  }, SEEK_BURST_MS);
 }
 
 function onAuthFailure() {
@@ -1146,7 +1325,11 @@ function playerSummary() {
   };
 }
 
+let loginBusy = false;
+
 async function doLogin() {
+  if (loginBusy) return; // a second click during an active login — ignore
+  loginBusy = true;
   const step = (msg) => {
     log('[login]', msg);
     plugin.sendToPI({ type: 'auth', ...auth.publicState(), status: 'connecting', message: msg, player: playerSummary() });
@@ -1188,6 +1371,8 @@ async function doLogin() {
       error: msg,
       player: playerSummary()
     });
+  } finally {
+    loginBusy = false;
   }
 }
 

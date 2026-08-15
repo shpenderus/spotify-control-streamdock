@@ -320,6 +320,8 @@ function updatePlayer(p) {
     el.innerHTML = 'Nothing is playing right now. Start music on any Spotify device.';
   } else if (p.empty === 'premium') {
     el.innerHTML = 'Playback control requires Spotify Premium.';
+  } else if (p.empty === 'notrack') {
+    el.innerHTML = 'Playing a non-track item (podcast, episode or ad) — no track info available.';
   } else if (p.track) {
     el.innerHTML = '<b>' + escapeHtml(p.track) + '</b><br>' + (p.playing ? '▶ playing' : '⏸ paused');
   } else {

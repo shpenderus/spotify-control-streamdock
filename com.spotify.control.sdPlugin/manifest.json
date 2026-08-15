@@ -14,7 +14,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Пауза/воспроизведение. Показывает обложку текущего трека и состояние.",
-      "UUID": "com.spotify.control.playpause",
+      "UUID": "com.spotify.control.ru.playpause",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -31,7 +31,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": false,
       "Tooltip": "Показывает обложку, название, исполнителя и время трека. Что отображать и размер шрифта настраивается в панели.",
-      "UUID": "com.spotify.control.info",
+      "UUID": "com.spotify.control.ru.info",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -48,7 +48,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Переключить на следующий трек",
-      "UUID": "com.spotify.control.next",
+      "UUID": "com.spotify.control.ru.next",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -65,7 +65,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Переключить на предыдущий трек",
-      "UUID": "com.spotify.control.previous",
+      "UUID": "com.spotify.control.ru.previous",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -90,7 +90,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Поставить/убрать лайк текущему треку. Состояние отображается на кнопке.",
-      "UUID": "com.spotify.control.like",
+      "UUID": "com.spotify.control.ru.like",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -115,7 +115,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Циклически переключает повтор: выкл → один трек → плейлист. Состояние отображается на кнопке.",
-      "UUID": "com.spotify.control.repeat",
+      "UUID": "com.spotify.control.ru.repeat",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -136,7 +136,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Включить/выключить перемешивание. Состояние отображается на кнопке.",
-      "UUID": "com.spotify.control.shuffle",
+      "UUID": "com.spotify.control.ru.shuffle",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -155,7 +155,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Вращение: перемотка внутри трека (1 шаг = 5 секунд). Нажатие: плей/пауза. Показывает текущее время трека.",
-      "UUID": "com.spotify.control.seek",
+      "UUID": "com.spotify.control.ru.seek",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -174,7 +174,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Вращение: следующий/предыдущий трек. Нажатие: плей/пауза.",
-      "UUID": "com.spotify.control.track",
+      "UUID": "com.spotify.control.ru.track",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
     {
@@ -193,7 +193,7 @@
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
       "Tooltip": "Вращение: громкость ±2% за шаг. Нажатие: плей/пауза. Показывает текущий уровень громкости.",
-      "UUID": "com.spotify.control.volume",
+      "UUID": "com.spotify.control.ru.volume",
       "PropertyInspectorPath": "propertyInspector/index.html"
     }
   ],
@@ -206,7 +206,7 @@
   "Description": "Управление Spotify: плей/пауза с обложкой трека, кнопка «Сейчас играет» с настраиваемым отображением (обложка, название, исполнитель, время, размер шрифта, авто-контраст по обложке, прогресс-бар), следующий/предыдущий трек, лайк, повтор, перемешивание. Длинный текст прокручивается бегущей строкой.",
   "Category": "Spotify",
   "CategoryIcon": "imgs/logo.svg",
-  "Version": "1.0.1",
+  "Version": "1.0.2",
   "OS": [
     {
       "Platform": "mac",

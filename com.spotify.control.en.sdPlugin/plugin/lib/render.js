@@ -175,13 +175,6 @@ function shuffleGlyph(fill) {
 function iconSvg(name, pressed) {
   let glyph = '';
   switch (name) {
-    case 'play':
-      glyph = `<path d="M28 21 L51 36 L28 51 Z" fill="${GREEN}" stroke="${GREEN}" stroke-width="4" stroke-linejoin="round"/>`;
-      break;
-    case 'pause':
-      glyph = `<rect x="25" y="20" width="8" height="32" rx="4" fill="${GREEN}"/>` +
-        `<rect x="39" y="20" width="8" height="32" rx="4" fill="${GREEN}"/>`;
-      break;
     case 'next':
       glyph = `<rect x="50" y="21" width="6" height="30" rx="3" fill="${GREEN}"/>` +
         `<path d="M22 22 L46 36 L22 50 Z" fill="${GREEN}" stroke="${GREEN}" stroke-width="4" stroke-linejoin="round"/>`;
@@ -224,13 +217,6 @@ function iconSvg(name, pressed) {
         `<path d="M42 28 A11 11 0 0 1 42 44" fill="none" stroke="${GREEN}" stroke-width="4" stroke-linecap="round"/>` +
         `<path d="M48 22 A18 18 0 0 1 48 50" fill="none" stroke="${GREEN}" stroke-width="4" stroke-linecap="round"/>`;
       break;
-    case 'info':
-      glyph = equalizerGlyph(GREEN);
-      break;
-    case 'logo':
-      return svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">` +
-        `<circle cx="36" cy="36" r="34" fill="${GREEN}"/>` +
-        `<path d="M29 22 L50 36 L29 50 Z" fill="${DARK}"/></svg>`);
     default:
       glyph = '';
   }

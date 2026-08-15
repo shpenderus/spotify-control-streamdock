@@ -320,6 +320,8 @@ function updatePlayer(p) {
     el.innerHTML = 'Сейчас ничего не играет. Запустите музыку на любом устройстве Spotify.';
   } else if (p.empty === 'premium') {
     el.innerHTML = 'Управление воспроизведением требует Spotify Premium.';
+  } else if (p.empty === 'notrack') {
+    el.innerHTML = 'Играет не трек (подкаст, эпизод или реклама) — информация о треке недоступна.';
   } else if (p.track) {
     el.innerHTML = '<b>' + escapeHtml(p.track) + '</b><br>' + (p.playing ? '▶ играет' : '⏸ на паузе');
   } else {

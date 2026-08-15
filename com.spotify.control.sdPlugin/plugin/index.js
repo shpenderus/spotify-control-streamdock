@@ -103,6 +103,7 @@ class Plugin {
         if (spot) {
           if (spot.accessToken) spot.accessToken = '***';
           if (spot.refreshToken) spot.refreshToken = '***';
+          if (spot.clientSecret) spot.clientSecret = '***';
         }
         pl = copy;
       } catch (e) { /* ignore */ }
@@ -214,6 +215,7 @@ const state = {
   track: null,     // { id, name, artists, durationMs, cover, coverSmall, uri }
   isPlaying: false,
   progressMs: 0,
+  progressAt: 0,   // когда progressMs последний раз получен с сервера (для точного локального инкремента)
   repeat: 'off',
   shuffle: false,
   liked: false,
@@ -225,6 +227,7 @@ const state = {
   volume: null,       // 0..100, громкость активного устройства (из /me/player)
   deviceId: null,     // id активного устройства (нужен для /volume)
   lastPoll: 0,
+  lastPollOk: 0, // когда poll последний раз УСПЕШНО обновил состояние (не сетевой сбой)
   endPollId: null, // id трека, для которого уже отправлен опрос в конце трека
   _lastTick: 0
 };
@@ -245,6 +248,11 @@ function loadLikeCache() {
 
 function saveLikeCache() {
   try {
+    // Кэш не должен расти бесконечно (по записи на каждый проверенный трек)
+    const keys = Object.keys(state.likedCache);
+    if (keys.length > 200) {
+      for (let i = 0; i < keys.length - 200; i++) delete state.likedCache[keys[i]];
+    }
     fs.writeFileSync(LIKE_CACHE_FILE, JSON.stringify(state.likedCache));
   } catch (e) { /* ignore */ }
 }
@@ -446,17 +454,24 @@ class TrackEncoderAction extends Action {
 
   dialRotate(ctx, ticks) {
     if (!ensureAuthed(ctx)) return;
-    if (ticks > 0) {
-      spotify.next().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
+    // Серия быстрых тиков одного поворота объединяется в ОДНО переключение трека
+    // (по направлению суммарных тиков) — как у громкости и перемотки. Иначе один
+    // поворот энкодера перескакивал через 3–5 треков.
+    const all = this._track || (this._track = {});
+    const s = all[ctx] || (all[ctx] = {});
+    s.net = (s.net || 0) + ticks;
+    if (s.timer) clearTimeout(s.timer);
+    s.timer = setTimeout(() => {
+      s.timer = null;
+      const net = s.net;
+      s.net = 0;
+      if (net === 0) return;
+      const fn = net > 0 ? () => spotify.next() : () => spotify.previous();
+      fn().then(() => { safePoll(); recheckAfterSkip(); }).catch((e) => {
         if (e instanceof AuthError) onAuthFailure();
         plugin.showAlert(ctx);
       });
-    } else if (ticks < 0) {
-      spotify.previous().then(() => { poll(); recheckAfterSkip(); }).catch((e) => {
-        if (e instanceof AuthError) onAuthFailure();
-        plugin.showAlert(ctx);
-      });
-    }
+    }, 120);
   }
 }
 
@@ -485,10 +500,26 @@ class VolumeEncoderAction extends Action {
 
   dialRotate(ctx, ticks) {
     if (!ensureAuthed(ctx)) return;
-    if (state.volume == null) { plugin.showAlert(ctx); return; }
-    const st = this._vol || (this._vol = {});
+    // Состояние серии вращения — на КАЖДУЮ кнопку (st[ctx]), как у перемотки:
+    // общий объект на все кнопки приводил к конфликту двух энкодеров громкости.
+    const all = this._vol || (this._vol = {});
+    const st = all[ctx] || (all[ctx] = {});
+    if (state.volume == null) {
+      // Алерт не чаще раза в 2 секунды (иначе спам на каждый тик).
+      if (!st.alertAt || Date.now() - st.alertAt > 2000) {
+        st.alertAt = Date.now();
+        plugin.showAlert(ctx);
+      }
+      return;
+    }
     const base = st.target != null ? st.target : state.volume;
-    const target = clamp(base + ticks * 2, 0, 100);
+    // Шаг одного эвента ограничен 10%: на некоторых устройствах первый эвент
+    // после простоя несёт большой ticks (тот же баг, что и с перемоткой),
+    // и без ограничения один щелчок прыгал бы на 40%+.
+    const rawDelta = ticks * 2;
+    const delta = clamp(rawDelta, -10, 10);
+    if (delta !== rawDelta) log('[volume] большой ticks =', ticks, '— шаг ограничен 10%');
+    const target = clamp(base + delta, 0, 100);
     st.target = target;
     // сразу показываем новое значение на дисплее энкодера
     plugin.setTitle(ctx, 'Громкость ' + Math.round(target) + '%');
@@ -550,6 +581,10 @@ function ensureCover(url) {
     .catch((e) => {
       coverLoading.delete(url);
       coverFailed.set(url, Date.now());
+      if (coverFailed.size > 50) {
+        const k = coverFailed.keys().next().value;
+        coverFailed.delete(k);
+      }
       log('[cover] ошибка загрузки:', e && e.message || e);
       return null;
     });
@@ -682,6 +717,8 @@ async function poll() {
       state.track = track;
       state.isPlaying = !!d.is_playing;
       state.progressMs = d.progress_ms || 0;
+      state.progressAt = Date.now();
+      state.lastPollOk = Date.now();
       state.repeat = d.repeat_state || 'off';
       state.shuffle = !!d.shuffle_state;
       state.volume = (d.device && typeof d.device.volume_percent === 'number') ? d.device.volume_percent : state.volume;
@@ -697,10 +734,26 @@ async function poll() {
       }
       renderAll(changed);
     } else if (res.status === 204 || (res.status === 200 && !res.data.item)) {
-      if (state.track || state.empty !== 'nodevice') {
+      if (state.track || state.empty !== 'nodevice' || state.likedKnown) {
         state.track = null;
         state.isPlaying = false;
         state.empty = 'nodevice';
+        state.liked = false;
+        state.likedKnown = false;
+        state.lastPollOk = Date.now();
+        renderAll(true);
+      }
+    } else if (res.status === 200 && res.data && res.data.item) {
+      // Подкаст, эпизод или реклама — не трек: показывать нечего, состояние
+      // раньше застревало на прошлой песне (кнопка «врала» весь эпизод).
+      const playing = !!res.data.is_playing;
+      if (state.track || state.empty !== 'notrack' || state.isPlaying !== playing || state.likedKnown) {
+        state.track = null;
+        state.isPlaying = playing;
+        state.empty = 'notrack';
+        state.liked = false;
+        state.likedKnown = false;
+        state.lastPollOk = Date.now();
         renderAll(true);
       }
     } else if (res.status === 429) {
@@ -729,6 +782,15 @@ async function poll() {
   }
 }
 
+// Опрос с уважением к backoff (429): обработчики нажатий звали poll()
+// напрямую и сбрасывали nextPollAt, долбя API во время рейт-лимита.
+// safePoll() пропускает опрос, пока действует пауза после 429.
+function safePoll() {
+  if (Date.now() < nextPollAt) return Promise.resolve(false);
+  const p = poll();
+  return p || Promise.resolve(false);
+}
+
 // Сериализация: все запросы статуса встают в очередь (промис-цепочку),
 // чтобы два запроса не бежали одновременно. Из-за гонки один мог ответить 200,
 // а второй — 403, и затёр бы состояние ПОСЛЕ успеха (кнопка показывала «нет»
@@ -748,13 +810,19 @@ async function doRefreshLike() {
     let res = state.likeLegacy
       ? await spotify.isLikedLegacy(state.track.id)
       : await spotify.isLiked(state.track.id);
-    // Ошибка на современном /v1/me/tracks/contains — пробуем старый /v1/me/library/contains
-    // (как в официальном плагине MiraBox, который у тебя работает): у части аккаунтов работают
-    // только старые эндпоинты (403/400 на новых, хотя права на месте).
-    // После первого успеха через старый эндпоинт запоминаем — дальше ходим сразу туда.
-    if (!(res.status >= 200 && res.status < 300) && !state.likeLegacy) {
-      log('[like] ' + res.status + ' на /me/tracks/contains, пробую /me/library/contains');
-      try { res = await spotify.isLikedLegacy(state.track.id); } catch (e2) { /* ниже обработаем */ }
+    // Не-2xx на текущем эндпоинте — пробуем другой (современный /v1/me/tracks/contains
+    // или старый /v1/me/library/contains, как в официальном плагине MiraBox): у части
+    // аккаунтов работают только старые эндпоинты (403/400 на новых, хотя права на месте),
+    // и наоборот. Запоминаем, какой эндпоинт реально сработал, чтобы не дёргать мёртвый.
+    if (!(res.status >= 200 && res.status < 300)) {
+      log('[like] ' + res.status + ' на ' + (state.likeLegacy ? '/me/library/contains' : '/me/tracks/contains') + ', пробую другой эндпоинт');
+      try {
+        const alt = state.likeLegacy
+          ? await spotify.isLiked(state.track.id)
+          : await spotify.isLikedLegacy(state.track.id);
+        res = alt;
+        if (alt.status >= 200 && alt.status < 300) state.likeLegacy = !state.likeLegacy;
+      } catch (e2) { /* ниже обработаем */ }
     }
     log('[like] ответ:', res.status, JSON.stringify(res.data));
     if (res.status === 200) {
@@ -763,7 +831,6 @@ async function doRefreshLike() {
       state.likedKnown = true;
       state.library403 = false;
       state.like403At = 0;
-      state.likeLegacy = true; // старый эндпоинт сработал — используем его дальше
       state.likedCache[state.track.id] = state.liked;
       saveLikeCache();
       renderLikeAll();
@@ -822,7 +889,11 @@ function tick() {
   }
   if (now >= nextPollAt && now - state.lastPoll > pollInterval()) poll();
   if (state.empty === 'none' && state.isPlaying && state.track) {
-    state.progressMs = Math.min(state.track.durationMs, state.progressMs + (now - (state._lastTick || now)));
+    // Точный локальный инкремент: от момента получения progressMs с сервера,
+    // а не от конца прошлого тика (иначе позиция убегала вперёд до ~1 сек).
+    const base = state.progressAt || now;
+    state.progressMs = Math.min(state.track.durationMs, state.progressMs + (now - base));
+    state.progressAt = now;
   }
   // Текущий трек вот-вот закончится (локальная оценка) — опрашиваем сразу,
   // чтобы информация о следующем треке (название, обложка, лайк) появилась
@@ -931,16 +1002,19 @@ async function togglePlayPause(ctx) {
       await spotify.setPlay(true);
     }
   } catch (e) {
-    if (e instanceof AuthError) onAuthFailure();
+    if (e instanceof AuthError) { onAuthFailure(); return; }
+    // Не-AuthError (403 без Premium, 404, сеть) — показываем ошибку,
+    // раньше нажатие молча «не работало».
+    plugin.showAlert(ctx);
   }
-  poll();
+  safePoll();
 }
 
 async function onNext(ctx) {
   if (!ensureAuthed(ctx)) return;
   try {
     await spotify.next();
-    poll();
+    safePoll();
     recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
@@ -952,7 +1026,7 @@ async function onPrevious(ctx) {
   if (!ensureAuthed(ctx)) return;
   try {
     await spotify.previous();
-    poll();
+    safePoll();
     recheckAfterSkip();
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
@@ -973,7 +1047,7 @@ function recheckAfterSkip() {
   const attempt = () => {
     if (tries >= 5) return;
     tries++;
-    poll().then(() => {
+    safePoll().then(() => {
       if (state.track && state.track.id !== startId) return; // переключился — готово
       _skipRecheck = setTimeout(attempt, 1500);
     });
@@ -1001,13 +1075,19 @@ async function toggleLike(ctx) {
     let res = state.likeLegacy
       ? await spotify.setLikedLegacy(state.track.id, target)
       : await spotify.setLiked(state.track.id, target);
-    // Ошибка на современном /v1/me/tracks — пробуем старый /v1/me/library (как в официальном плагине).
-    if (!(res.status >= 200 && res.status < 300) && !state.likeLegacy) {
-      log('[like] set ' + res.status + ' на /me/tracks, пробую /me/library');
-      try { res = await spotify.setLikedLegacy(state.track.id, target); } catch (e2) { /* ниже обработаем */ }
+    // Не-2xx на текущем эндпоинте — пробуем другой (как в официальном плагине MiraBox)
+    // и запоминаем, какой реально сработал.
+    if (!(res.status >= 200 && res.status < 300)) {
+      log('[like] set ' + res.status + ' на ' + (state.likeLegacy ? '/me/library' : '/me/tracks') + ', пробую другой');
+      try {
+        const alt = state.likeLegacy
+          ? await spotify.setLiked(state.track.id, target)
+          : await spotify.setLikedLegacy(state.track.id, target);
+        res = alt;
+        if (alt.status >= 200 && alt.status < 300) state.likeLegacy = !state.likeLegacy;
+      } catch (e2) { /* ниже обработаем */ }
     }
     if (res.status >= 200 && res.status < 300) {
-      state.likeLegacy = true;
       state.likedCache[state.track.id] = target;
       saveLikeCache();
       // Подтверждаем реальный статус — чтобы кнопка точно совпала с треком
@@ -1043,12 +1123,16 @@ async function cycleRepeat(ctx) {
   const order = ['off', 'track', 'context'];
   const idx = order.indexOf(state.repeat);
   const next = order[(idx + 1) % order.length];
+  const prev = state.repeat;
   state.repeat = next;
   renderRepeatAll();
   try {
     await spotify.setRepeat(next);
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
+    // Ошибка API — откатываем иконку, чтобы кнопка не «врала» до следующего опроса.
+    state.repeat = prev;
+    renderRepeatAll();
     plugin.showAlert(ctx);
   }
 }
@@ -1056,29 +1140,111 @@ async function cycleRepeat(ctx) {
 async function toggleShuffle(ctx) {
   if (!ensureAuthed(ctx)) return;
   const target = !state.shuffle;
+  const prev = state.shuffle;
   state.shuffle = target;
   renderShuffleAll();
   try {
     await spotify.setShuffle(target);
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
+    state.shuffle = prev;
+    renderShuffleAll();
     plugin.showAlert(ctx);
   }
 }
 
 // Перемотка энкодером: каждый тик = 5 секунд (как в референс-плагине).
 // Быстрые тики накапливаются и сбрасываются одним запросом через 120 мс.
-function seekByTicks(ctx, ticks, action) {
+// Перемотка энкодером. Серия тиков накапливается в буфере и применяется ОДНИМ
+// запросом seek после паузы во вращении (SEEK_BURST_MS). КАЖДАЯ новая серия
+// начинается со свежего опроса: позиция в состоянии может быть от ПРЕДЫДУЩЕГО
+// трека — трек только что сменился (next/плейлист), а poll ещё не догнал, и
+// seek с такой базой улетал на полтрека вперёд/назад. Плюс:
+//   * шаг одного эвента ограничен 30 с — одиночный «шумовой» эвент не может
+//     перемотать далеко, а непрерывное вращение продолжает копить дальше;
+//   * после seek НЕТ немедленного опроса — он мог вернуть позицию, снятую до
+//     применения seek, и перезаписать прогресс старым значением (seek «прыгал
+//     назад», когда крутишь только вперёд). Плановый опрос всё выровняет.
+const SEEK_BURST_MS = 300;      // окно накопления тиков, мс
+const SEEK_MAX_STEP_MS = 30000; // максимум перемотки за один эвент, мс
+
+// Свежий опрос перед серией вращения: ждём текущий (если идёт, не дольше 3 с)
+// или запускаем новый. Разрешается true, только если poll реально получил
+// свежий ответ (lastPollOk сдвинулся), а не упал по сети/429. При активном
+// 429-backoff серия пропускается — база может быть от старого трека.
+function ensureFreshPoll() {
+  const before = state.lastPollOk;
+  const finish = () => state.lastPollOk > before;
+  if (polling) {
+    // опрос уже идёт — дожидаемся его результата
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const iv = setInterval(() => {
+        if (!polling || Date.now() - started > 3000) {
+          clearInterval(iv);
+          resolve(finish());
+        }
+      }, 100);
+    });
+  }
+  if (Date.now() < nextPollAt) {
+    // 429-backoff: свежий опрос невозможен, а база может быть от старого трека
+    // (трек сменился, пока опросы заблокированы) — вслепую не перематываем,
+    // серия пропускается; следующее вращение попробует после паузы.
+    return Promise.resolve(false);
+  }
+  const p = poll();
+  return p ? p.then(finish) : Promise.resolve(finish());
+}
+
+async function seekByTicks(ctx, ticks, action) {
   if (!ensureAuthed(ctx)) return;
-  if (!state.track || state.empty !== 'none') { plugin.showAlert(ctx); return; }
   // Состояние на каждую кнопку (один экземпляр действия обслуживает все
   // кнопки энкодера перемотки): накопленный таргет и таймер дебаунса
   // не должны смешиваться между кнопками.
   const st = action._seek || (action._seek = {});
   const s = st[ctx] || (st[ctx] = {});
-  if (!s.rotTrackId) s.rotTrackId = state.track.id; // трек на старте серии вращений
+  if (!state.track || state.empty !== 'none') {
+    // Не спамим алертами на каждый тик — не чаще раза в 2 секунды.
+    if (!s.alertAt || Date.now() - s.alertAt > 2000) {
+      s.alertAt = Date.now();
+      plugin.showAlert(ctx);
+    }
+    return;
+  }
+  if (!s.rotTrackId) {
+    // Начало новой серии: база обязана быть от ТЕКУЩЕГО трека. Тики копим,
+    // пока идёт свежий опрос, затем применяем один раз.
+    s.rotTrackId = state.track.id;
+    s.awaiting = true;
+    s.pendingTicks = (s.pendingTicks || 0) + ticks;
+    ensureFreshPoll().then((ok) => {
+      s.awaiting = false;
+      const t = s.pendingTicks;
+      s.pendingTicks = 0;
+      if (!ok || !state.track || state.empty !== 'none') {
+        // Свежий ответ не получили (сеть/429/опрос идёт) — вслепую не
+        // перематываем; следующее вращение попробует снова.
+        s.rotTrackId = null;
+        return;
+      }
+      s.rotTrackId = state.track.id; // привязываемся к актуальному треку
+      if (t !== 0) accumulateSeek(ctx, s, t);
+    }).catch(() => { s.awaiting = false; s.rotTrackId = null; });
+    return;
+  }
+  if (s.awaiting) { s.pendingTicks = (s.pendingTicks || 0) + ticks; return; }
+  accumulateSeek(ctx, s, ticks);
+}
+
+function accumulateSeek(ctx, s, ticks) {
   const base = s.target != null ? s.target : state.progressMs;
-  const target = clamp(base + ticks * 5000, 0, state.track.durationMs);
+  const rawDelta = ticks * 5000;
+  const delta = clamp(rawDelta, -SEEK_MAX_STEP_MS, SEEK_MAX_STEP_MS);
+  if (delta !== rawDelta) {
+    log('[seek] большой ticks =', ticks, '— шаг ограничен', SEEK_MAX_STEP_MS / 1000 + 'с');
+  }
+  const target = clamp(base + delta, 0, state.track.durationMs);
   s.target = target;
   // сразу показываем новую позицию на дисплее энкодера
   plugin.setTitle(ctx, fmtTime(target) + ' / ' + fmtTime(state.track.durationMs));
@@ -1094,21 +1260,31 @@ function seekByTicks(ctx, ticks, action) {
       log('[seek] трек сменился во время вращения — перемотку пропускаем');
       return;
     }
+    const prevProgress = state.progressMs;
     state.progressMs = target;
+    state.progressAt = Date.now();
     spotify.seek(target).then(() => {
       // если трек сменился, пока запрос летел, Spotify мог применить его
       // к новому треку — откатываем новый трек в начало
       if (rotTrack && rotTrack !== state.track.id) {
         log('[seek] запоздавший seek применился к', state.track.name, '— сбрасываем в 0');
         state.progressMs = 0;
+        state.progressAt = Date.now();
         spotify.seek(0).catch(() => {});
       }
-      poll(); // синхронизируем progressMs с реальной позицией
+      // Без немедленного опроса: он мог вернуть позицию, снятую до применения
+      // seek, и перезаписать прогресс старым значением («лаги» назад).
     }).catch((e) => {
       log('[seek] error:', e && e.message || e);
-      if (e instanceof AuthError) onAuthFailure();
+      if (e instanceof AuthError) { onAuthFailure(); return; }
+      // seek не применился (404 нет устройства и т.п.) — возвращаем реальную
+      // позицию, чтобы прогресс-бар не «врал» до планового опроса
+      if (rotTrack && rotTrack === state.track.id) {
+        state.progressMs = prevProgress;
+        state.progressAt = Date.now();
+      }
     });
-  }, 120);
+  }, SEEK_BURST_MS);
 }
 
 function onAuthFailure() {
@@ -1147,7 +1323,11 @@ function playerSummary() {
   };
 }
 
+let loginBusy = false;
+
 async function doLogin() {
+  if (loginBusy) return; // повторный клик во время активного входа — игнорируем
+  loginBusy = true;
   const step = (msg) => {
     log('[login]', msg);
     plugin.sendToPI({ type: 'auth', ...auth.publicState(), status: 'connecting', message: msg, player: playerSummary() });
@@ -1189,6 +1369,8 @@ async function doLogin() {
       error: msg,
       player: playerSummary()
     });
+  } finally {
+    loginBusy = false;
   }
 }
 

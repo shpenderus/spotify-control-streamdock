@@ -21,14 +21,6 @@ function fmtTime(ms) {
   return h > 0 ? h + ':' + (m < 10 ? '0' + m : '' + m) + ':' + ss : m + ':' + ss;
 }
 
-// Truncate a string with an ellipsis to fit the button
-function truncate(s, maxChars) {
-  s = String(s == null ? '' : s);
-  if (s.length <= maxChars) return s;
-  if (maxChars <= 1) return s.slice(0, maxChars);
-  return s.slice(0, maxChars - 1) + '…';
-}
-
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
@@ -87,4 +79,4 @@ function dataUrlFromBuffer(buffer, contentType) {
   return 'data:' + (contentType || 'image/jpeg') + ';base64,' + buffer.toString('base64');
 }
 
-module.exports = { escapeXml, fmtTime, truncate, clamp, svgDataUrl, getBuffer, dataUrlFromBuffer };
+module.exports = { escapeXml, fmtTime, clamp, svgDataUrl, getBuffer, dataUrlFromBuffer };

@@ -39,6 +39,8 @@ class Auth {
     this.account = null;
     this.grantedScopes = null; // scopes returned by Spotify in the token response (the most reliable source)
     this.filePath = path.join(os.homedir(), FILE_NAME);
+    this._serverPromise = null;
+    this._serverReject = null;
     this.loadFile();
   }
 
@@ -173,8 +175,10 @@ class Auth {
 
     let ru;
     try { ru = new URL(this.redirectUri); } catch (e) { throw new Error('Invalid Redirect URI'); }
-    if (!/^127\.0\.0\.1$|^localhost$|^\[::1\]$/.test(ru.hostname)) {
-      throw new Error('Redirect URI must point to 127.0.0.1 (local server)');
+    // The server only listens on 127.0.0.1 — localhost/[::1] is rejected:
+    // the browser may resolve to IPv6 and get a connection refused.
+    if (!/^127\.0\.0\.1$/.test(ru.hostname)) {
+      throw new Error('Redirect URI must point to 127.0.0.1 (local server). localhost is not supported — use 127.0.0.1.');
     }
     const port = parseInt(ru.port || '80', 10);
     const callbackPath = ru.pathname || '/';
@@ -182,10 +186,12 @@ class Auth {
 
     this._stopLoginServer();
     this._serverPromise = new Promise((resolve, reject) => {
+      this._serverReject = reject;
       let settled = false;
       const finish = (fn, value) => {
         if (settled) return;
         settled = true;
+        this._serverReject = null;
         if (this._serverTimeout) { clearTimeout(this._serverTimeout); this._serverTimeout = null; }
         try { if (this._server) this._server.close(); } catch (e) { /* ignore */ }
         this._server = null;
@@ -238,7 +244,12 @@ class Auth {
   _stopLoginServer() {
     if (this._server) { try { this._server.close(); } catch (e) { /* ignore */ } this._server = null; }
     if (this._serverTimeout) { clearTimeout(this._serverTimeout); this._serverTimeout = null; }
+    // If the previous login was still waiting for a code, reject it — otherwise
+    // it would hang forever after clicking "Sign in" again.
+    const reject = this._serverReject;
+    this._serverReject = null;
     this._serverPromise = null;
+    if (reject) reject(new Error('Authorization cancelled — a new one was started'));
   }
 
   // Step 2: wait for Spotify to return the code to the local server
@@ -274,4 +285,4 @@ class Auth {
   }
 }
 
-module.exports = { Auth, DEFAULT_REDIRECT };
+module.exports = { Auth };

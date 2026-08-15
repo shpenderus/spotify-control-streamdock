@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue.svg)](#)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](#)
-[![Version](https://img.shields.io/badge/version-1.0.1-orange.svg)](#)
+[![Version](https://img.shields.io/badge/version-1.0.2-orange.svg)](#)
 
 **Русская версия** · [English variant](com.spotify.control.en.sdPlugin/README.md)
 
