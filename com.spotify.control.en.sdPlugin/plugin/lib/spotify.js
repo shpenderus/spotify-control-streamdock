@@ -109,10 +109,13 @@ class SpotifyApi {
     }
 
     let data = null;
+    let text = null;
     if (res.body && res.body.length) {
-      try { data = JSON.parse(res.body.toString('utf8')); } catch (e) { /* ignore */ }
+      text = res.body.toString('utf8');
+      try { data = JSON.parse(text); } catch (e) { /* ignore */ }
     }
-    return { status: res.status, data };
+    const message = (data && ((data.error && (data.error.message || data.error)) || data.message)) || text;
+    return { status: res.status, data, text, message };
   }
 
   getPlayer() { return this.api('GET', '/v1/me/player'); }
@@ -133,6 +136,23 @@ class SpotifyApi {
     const qs = { volume_percent: Math.max(0, Math.min(100, Math.round(percent))) };
     if (deviceId) qs.device_id = deviceId;
     return this.api('PUT', '/v1/me/player/volume', { qs });
+  }
+
+  devices() {
+    return this.api('GET', '/v1/me/player/devices');
+  }
+  // Activate a device (move playback to it)
+  transferPlayback(deviceId, play) {
+    return this.api('PUT', '/v1/me/player', { json: { device_ids: [deviceId], play: !!play } });
+  }
+  // Start playing a context (playlist/album/Liked Songs)
+  playContext(contextUri, deviceId) {
+    const json = { context_uri: contextUri };
+    if (deviceId) json.device_id = deviceId;
+    return this.api('PUT', '/v1/me/player/play', { json });
+  }
+  playlists() {
+    return this.api('GET', '/v1/me/playlists', { qs: { limit: 50 } });
   }
 
   isLiked(trackId) {

@@ -64,7 +64,7 @@
       "Controllers": [],
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
-      "Tooltip": "Go back to the previous track",
+      "Tooltip": "Restart the track (if playing for more than 3 seconds), a repeated press goes to the previous track.",
       "UUID": "com.spotify.control.previous",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
@@ -195,6 +195,23 @@
       "Tooltip": "Rotate: volume ±2% per step. Press: play/pause. Shows the current volume level.",
       "UUID": "com.spotify.control.volume",
       "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/playlist.svg",
+      "Name": "Playlist",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/playlist.svg",
+          "Name": "Playlist"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Starts the selected playlist (or Liked Songs). The playlist is chosen in the button settings.",
+      "UUID": "com.spotify.control.playlist",
+      "PropertyInspectorPath": "propertyInspector/index.html"
     }
   ],
   "SDKVersion": 1,
@@ -203,10 +220,10 @@
   "Icon": "imgs/logo.svg",
   "CodePathWin": "plugin/index.js",
   "CodePathMac": "plugin/index.js",
-  "Description": "Spotify control: play/pause with track cover, a Now Playing button with configurable display (cover, title, artist, time, font size, cover-based auto contrast, progress bar), next/previous track, like, repeat, shuffle. Long text scrolls as a marquee.",
+  "Description": "Spotify control: play/pause with track cover, a Now Playing button with configurable display (cover, title, artist, time, font size, cover-based auto contrast, progress bar), next/previous track, like, repeat, shuffle, playlist buttons. Long text scrolls as a marquee.",
   "Category": "Spotify",
   "CategoryIcon": "imgs/logo.svg",
-  "Version": "1.0.2",
+  "Version": "1.0.3",
   "OS": [
     {
       "Platform": "mac",

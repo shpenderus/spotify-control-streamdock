@@ -84,6 +84,17 @@
       <div class="hint">Если название или исполнитель не помещаются в кнопку — текст автоматически прокручивается бегущей строкой. Авто-контраст подбирает чёрный или белый текст по яркости обложки, чтобы он не сливался.</div>
     </section>
 
+    <section class="card" id="playlistCard" hidden>
+      <h2>Плейлист</h2>
+      <label class="field">Плейлист для запуска
+        <select id="playlistSelect"></select>
+      </label>
+      <div class="row">
+        <button id="playlistRefresh" class="btn ghost">Обновить список</button>
+      </div>
+      <div class="hint">Нажатие на кнопку запустит выбранный плейлист. «❤️ Любимые треки» — ваша коллекция лайков. Если плейлиста нет в списке — обновите.</div>
+    </section>
+
     <section class="card">
       <h2>Сейчас играет</h2>
       <div class="player" id="playerInfo">—</div>

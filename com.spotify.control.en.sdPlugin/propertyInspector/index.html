@@ -84,6 +84,17 @@
       <div class="hint">If the title or artist doesn't fit on the button, the text automatically scrolls as a marquee. Auto-contrast picks black or white text based on the cover brightness so it never blends in.</div>
     </section>
 
+    <section class="card" id="playlistCard" hidden>
+      <h2>Playlist</h2>
+      <label class="field">Playlist to start
+        <select id="playlistSelect"></select>
+      </label>
+      <div class="row">
+        <button id="playlistRefresh" class="btn ghost">Refresh list</button>
+      </div>
+      <div class="hint">Pressing the button starts the selected playlist. "❤️ Liked Songs" is your collection of likes. If a playlist is missing from the list, refresh it.</div>
+    </section>
+
     <section class="card">
       <h2>Now Playing</h2>
       <div class="player" id="playerInfo">—</div>

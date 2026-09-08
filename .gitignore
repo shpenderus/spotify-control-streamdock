@@ -1,0 +1,28 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node
+node_modules/
+
+# Build artifacts
+*.zip
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local token/cache files (should never be committed)
+.spotify-control-streamdock.json
+.spotify-control-likecache.json
+
+# Freebuff tool internals
+.freebuff/
+
+# Other local plugins (not part of this repo)
+com.tvremote.control.sdPlugin/
+
+# Stray screenshot (local only)
+image.png

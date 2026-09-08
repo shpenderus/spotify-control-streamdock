@@ -11,7 +11,9 @@ const SCOPES = [
   'user-modify-playback-state',
   'user-read-currently-playing',
   'user-library-read',
-  'user-library-modify'
+  'user-library-modify',
+  'playlist-read-private',
+  'user-read-private'
 ].join(' ');
 
 const DEFAULT_REDIRECT = 'http://127.0.0.1:8888/callback';
@@ -37,6 +39,7 @@ class Auth {
     this.refreshToken = null;
     this.expiresAt = 0;
     this.account = null;
+    this.product = null;
     this.grantedScopes = null; // права, которые вернул сам Spotify в ответе токена (самый надёжный источник)
     this.filePath = path.join(os.homedir(), FILE_NAME);
     this._serverPromise = null;
@@ -53,6 +56,7 @@ class Auth {
       refreshToken: this.refreshToken,
       expiresAt: this.expiresAt,
       account: this.account,
+      product: this.product,
       scopes: this.grantedScopes
     };
   }
@@ -66,6 +70,7 @@ class Auth {
     if (typeof d.refreshToken === 'string') this.refreshToken = d.refreshToken;
     if (typeof d.expiresAt === 'number') this.expiresAt = d.expiresAt;
     if (typeof d.account === 'string') this.account = d.account;
+    if (typeof d.product === 'string') this.product = d.product;
     if (typeof d.scopes === 'string') this.grantedScopes = d.scopes.split(' ');
     else if (Array.isArray(d.scopes)) this.grantedScopes = d.scopes;
   }
@@ -90,7 +95,8 @@ class Auth {
       clientId: this.clientId,
       hasSecret: !!this.clientSecret,
       redirectUri: this.redirectUri,
-      account: this.account
+      account: this.account,
+      product: this.product
     };
   }
 
@@ -160,6 +166,7 @@ class Auth {
     this.refreshToken = null;
     this.expiresAt = 0;
     this.account = null;
+    this.product = null;
     this.grantedScopes = null;
     this.save();
   }
@@ -279,6 +286,7 @@ class Auth {
       response_type: 'code',
       redirect_uri: this.redirectUri,
       scope: SCOPES,
+      show_dialog: 'true',
       state: this._state || crypto.randomBytes(8).toString('hex')
     });
     return 'https://accounts.spotify.com/authorize?' + params.toString();

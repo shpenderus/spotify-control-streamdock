@@ -10,13 +10,14 @@ Compatible with Mirabox Stream Dock (StreamDock / HotSpot software), Ajazz Strea
 | **Play/Pause** | Pause/resume playback. Shows the **current track cover**. You can enable a caption (title, artist, time), adjust the font size, **time color**, the **play/pause icon** (off by default, green like the other buttons) and a **progress bar** (thin green bar at the bottom) |
 | **Now Playing** | Shows the cover, title, artist and time of the current track. In the button settings you can choose **exactly what to display** (cover / title / artist / time / progress bar), the **font size** (6–30) and the **time color**. Pressing toggles play/pause |
 | **Next Track** | Skips to the next track |
-| **Previous Track** | Goes back to the previous track |
+| **Previous Track** | Restarts the track (if playing for more than ~3 seconds); a repeated press goes to the previous track |
 | **Like** | Likes/unlikes the current track; the state is shown on the button (gray heart → green). While the status is unknown or the token lacks the scopes, a heart with a question mark is shown |
 | **Repeat** | Cycles repeat mode: **off → one track → playlist**; the state is shown on the button |
 | **Shuffle** | Toggles shuffle; the state is shown on the button |
 | **Seek (Encoder)** | For devices with an encoder: rotate — smooth seeking within the track (1 step = 5 seconds, via the official `PUT /me/player/seek` API), press — play/pause. Shows the current track time on the encoder display |
 | **Tracks (Encoder)** | For devices with an encoder: rotate — next/previous track, press — play/pause |
 | **Volume (Encoder)** | For devices with an encoder: rotate — volume ±2% per step (official `PUT /me/player/volume` API), press — play/pause. Shows the current volume level |
+| **Playlist** | Starts the playlist chosen in the settings (incl. Liked Songs). The button shows the playlist name |
 
 - Icons in the Spotify green style (#1DB954), dark minimalist design.
 - Long titles and artists **scroll as a marquee** when they don't fit on the button.
@@ -67,6 +68,8 @@ Compatible with Mirabox Stream Dock (StreamDock / HotSpot software), Ajazz Strea
 - "Plugin Log", "Sign in" and "Sign out" work in the settings of **any** plugin button.
 - Every button's settings are stored separately, change **one field at a time** (without resetting the others) and apply to the exact button whose panel you opened (even when several identical buttons exist).
 - Buttons update automatically (~1–2 s). Track info comes from your account: it works on any device where Spotify is playing (PC, phone, speaker).
+- Polling is **adaptive**: the longer a track plays, the rarer the plugin polls the API (rate-limit friendly), but near the end of a track polling speeds up to 5 s — the cover and title of the next track appear right away.
+- The **Playlist** button needs the extra `playlist-read-private` scope: after updating the plugin, sign out and sign in with Spotify once.
 - When nothing is playing, buttons show a dimmed icon; pressing shows an alert.
 - Account and tokens are stored in the StreamDock global settings and in `%USERPROFILE%\.spotify-control-streamdock.json`. "Sign out" deletes the tokens.
 

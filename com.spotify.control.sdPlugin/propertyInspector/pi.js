@@ -9,6 +9,7 @@ var $settings = {};
 var $wired = false;
 var $gotState = false;
 var $noResponseTimer = null;
+var $playlistsLoaded = false;
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -181,6 +182,17 @@ function wire() {
     saveDisplay({ timeColor: $('optTimeColor').value });
   });
 
+  // Кнопка-плейлист: список плейлистов и выбор
+  $('playlistRefresh').addEventListener('click', function () {
+    if (!ensureWs()) return;
+    sendToPlugin({ type: 'getPlaylists' });
+  });
+  $('playlistSelect').addEventListener('change', function () {
+    var opt = this.selectedOptions && this.selectedOptions[0];
+    if (!opt) return;
+    saveDisplay({ playlistId: opt.value, playlistName: opt.textContent, playlistUri: opt.dataset.uri || '' });
+  });
+
 }
 
 function isDynamicAction() {
@@ -206,6 +218,19 @@ function applySettings() {
     $('fontVal').textContent = $('optFont').value;
   }
   $('displayCard').hidden = false;
+
+  // Карточки кнопок показываем только для своего действия
+  var isPlaylist = $actionName === 'playlist';
+  $('playlistCard').hidden = !isPlaylist;
+
+  if (isPlaylist) {
+    $('playlistSelect').value = s.playlistId || '';
+    // список плейлистов тянем один раз при открытии панели
+    if (!$playlistsLoaded) {
+      $playlistsLoaded = true;
+      sendToPlugin({ type: 'getPlaylists' });
+    }
+  }
 }
 
 function applyPi(payload) {
@@ -232,6 +257,33 @@ function applyPi(payload) {
       $('authMsg').textContent = payload.message;
       $('authMsg').className = 'msg connecting';
     }
+  }
+
+  if (payload.type === 'playlists') {
+    var sel = $('playlistSelect');
+    var cur = $settings.playlistId || '';
+    var items = payload.items || [];
+    sel.innerHTML = '';
+    var ph = document.createElement('option');
+    ph.value = '';
+    ph.textContent = '— выберите плейлист —';
+    sel.appendChild(ph);
+    items.forEach(function (it) {
+      var o = document.createElement('option');
+      o.value = it.id;
+      o.textContent = it.name;
+      o.dataset.uri = it.uri || '';
+      sel.appendChild(o);
+    });
+    // сохранённый плейлист мог не попасть в первые 50 — добавляем отдельно
+    if (cur && !items.some(function (it) { return it.id === cur; })) {
+      var o = document.createElement('option');
+      o.value = cur;
+      o.textContent = $settings.playlistName || cur;
+      o.dataset.uri = $settings.playlistUri || '';
+      sel.appendChild(o);
+    }
+    sel.value = cur;
   }
 
   if (payload.type === 'state' || payload.type === 'auth') {
@@ -291,12 +343,34 @@ function updateAuth(p) {
     return;
   }
 
+  if (p.apiError) {
+    status.textContent = 'Ошибка Spotify 403';
+    status.className = 'status';
+    logoutBtn.disabled = !p.loggedIn;
+    if (/owner of the app/i.test(p.apiError)) {
+      msg.textContent = '⚠️ Spotify API (403): Владелец приложения (аккаунт, создавший Client ID на developer.spotify.com) должен иметь подписку Premium. Если вы сменили аккаунт — создайте Client ID на developer.spotify.com под новым аккаунтом с Premium. Если подписка продлена только что на том же аккаунте — Spotify Developer Dashboard обновляет статус биллинга с задержкой до нескольких часов.';
+    } else {
+      msg.textContent = '⚠️ Spotify API: ' + p.apiError;
+    }
+    msg.className = 'msg';
+    return;
+  }
+
   if (p.loggedIn) {
-    status.textContent = p.account ? 'Подключено: ' + p.account : 'Подключено';
+    var acc = p.account || '';
+    var prod = p.product ? (p.product === 'premium' ? 'Premium' : p.product) : '';
+    var full = acc;
+    if (prod) full += (full ? ' (' + prod + ')' : prod);
+    status.textContent = full ? 'Подключено: ' + full : 'Подключено';
     status.className = 'status ok';
     logoutBtn.disabled = false;
-    msg.textContent = '';
-    msg.className = 'msg';
+    if (p.product && p.product !== 'premium') {
+      msg.textContent = '⚠️ Тип подписки аккаунта — ' + p.product + '. Для управления воспроизведением через API требуется Spotify Premium.';
+      msg.className = 'msg';
+    } else {
+      msg.textContent = '';
+      msg.className = 'msg';
+    }
     $('loginLink').hidden = true;
   } else {
     status.textContent = 'Не подключено';

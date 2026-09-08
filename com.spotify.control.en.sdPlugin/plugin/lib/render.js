@@ -170,6 +170,33 @@ function shuffleGlyph(fill) {
     `d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></g>`;
 }
 
+/* ---------- Glyphs for the new buttons (playlist / device / sleep timer) ---------- */
+
+// Playlist: list rows + play triangle
+function playlistGlyph(fill) {
+  return `<rect x="18" y="17" width="22" height="4" rx="2" fill="${fill}"/>` +
+    `<rect x="18" y="25" width="22" height="4" rx="2" fill="${fill}"/>` +
+    `<rect x="18" y="33" width="14" height="4" rx="2" fill="${fill}"/>` +
+    `<path d="M45 21 L53 26 L45 31 Z" fill="${fill}"/>`;
+}
+
+// Label button: icon on top, text below (playlist).
+// Long text scrolls as a marquee, like on the other buttons.
+function renderLabelButton(opts) {
+  const size = 13;
+  const text = String(opts.text == null ? '' : opts.text);
+  const line = { text, overflow: text.length > fitChars(size), fill: WHITE, weight: 'bold' };
+  // The marquee phase (2 fps, like the other buttons) enters the image ONLY when
+  // the text overflows: otherwise the SVG is stable and the setIcon dedup does
+  // not send images every 100 ms (an image flood used to freeze the device).
+  const phase = line.overflow ? (Math.floor((opts.phase || 0) / 500) * 500) : 0;
+  const block = textBlock([line], size, phase);
+  let inner = bgRect() + playlistGlyph(GREEN);
+  inner += `<g transform="translate(0, ${(SIZE - block.height - 4).toFixed(1)})">${block.html}</g>`;
+  if (opts.pressed) inner = pressScale(inner);
+  return frame(inner);
+}
+
 /* ---------- Static icons (mirror imgs/*.svg) ---------- */
 
 function iconSvg(name, pressed) {
@@ -217,6 +244,9 @@ function iconSvg(name, pressed) {
         `<path d="M42 28 A11 11 0 0 1 42 44" fill="none" stroke="${GREEN}" stroke-width="4" stroke-linecap="round"/>` +
         `<path d="M48 22 A18 18 0 0 1 48 50" fill="none" stroke="${GREEN}" stroke-width="4" stroke-linecap="round"/>`;
       break;
+    case 'playlist':
+      glyph = playlistGlyph(GREEN);
+      break;
     default:
       glyph = '';
   }
@@ -260,7 +290,7 @@ function renderPlayPause(opts) {
     } else {
       inner += bgRect();
     }
-    if (showIcon) inner += chip(36, 36, playing, 30);
+    if (showIcon || !hasCover) inner += chip(36, 36, playing, 30);
   }
   // Thin green progress bar at the bottom (the "Progress bar" option)
   if (settings.progressBar !== false && track && empty === 'none') {
@@ -307,5 +337,6 @@ module.exports = {
   iconSvg,
   renderPlayPause,
   renderInfo,
+  renderLabelButton,
   needsMarquee
 };

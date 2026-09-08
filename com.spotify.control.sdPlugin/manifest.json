@@ -64,7 +64,7 @@
       "Controllers": [],
       "UserTitleEnabled": false,
       "SupportedInMultiActions": true,
-      "Tooltip": "Переключить на предыдущий трек",
+      "Tooltip": "В начало трека (если играет больше 3 секунд), повторное нажатие — на предыдущий трек.",
       "UUID": "com.spotify.control.ru.previous",
       "PropertyInspectorPath": "propertyInspector/index.html"
     },
@@ -195,6 +195,23 @@
       "Tooltip": "Вращение: громкость ±2% за шаг. Нажатие: плей/пауза. Показывает текущий уровень громкости.",
       "UUID": "com.spotify.control.ru.volume",
       "PropertyInspectorPath": "propertyInspector/index.html"
+    },
+    {
+      "Icon": "imgs/playlist.svg",
+      "Name": "Плейлист",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/playlist.svg",
+          "Name": "Playlist"
+        }
+      ],
+      "Controllers": [],
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "Tooltip": "Запускает выбранный плейлист (или «Любимые треки»). Плейлист выбирается в настройках кнопки.",
+      "UUID": "com.spotify.control.ru.playlist",
+      "PropertyInspectorPath": "propertyInspector/index.html"
     }
   ],
   "SDKVersion": 1,
@@ -203,10 +220,10 @@
   "Icon": "imgs/logo.svg",
   "CodePathWin": "plugin/index.js",
   "CodePathMac": "plugin/index.js",
-  "Description": "Управление Spotify: плей/пауза с обложкой трека, кнопка «Сейчас играет» с настраиваемым отображением (обложка, название, исполнитель, время, размер шрифта, авто-контраст по обложке, прогресс-бар), следующий/предыдущий трек, лайк, повтор, перемешивание. Длинный текст прокручивается бегущей строкой.",
+  "Description": "Управление Spotify: плей/пауза с обложкой трека, кнопка «Сейчас играет» с настраиваемым отображением (обложка, название, исполнитель, время, размер шрифта, авто-контраст по обложке, прогресс-бар), следующий/предыдущий трек, лайк, повтор, перемешивание, кнопки-плейлисты. Длинный текст прокручивается бегущей строкой.",
   "Category": "Spotify",
   "CategoryIcon": "imgs/logo.svg",
-  "Version": "1.0.2",
+  "Version": "1.0.3",
   "OS": [
     {
       "Platform": "mac",

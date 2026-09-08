@@ -68,6 +68,19 @@ label.field input {
 }
 label.field input:focus { border-color: var(--green); }
 
+label.field select {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 9px;
+  font-size: 13px;
+  outline: none;
+}
+label.field select:focus { border-color: var(--green); }
+
 .hint {
   font-size: 11px;
   color: var(--faint);

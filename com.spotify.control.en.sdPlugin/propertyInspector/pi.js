@@ -9,6 +9,7 @@ var $settings = {};
 var $wired = false;
 var $gotState = false;
 var $noResponseTimer = null;
+var $playlistsLoaded = false;
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -181,6 +182,17 @@ function wire() {
     saveDisplay({ timeColor: $('optTimeColor').value });
   });
 
+  // Playlist button: playlist list and selection
+  $('playlistRefresh').addEventListener('click', function () {
+    if (!ensureWs()) return;
+    sendToPlugin({ type: 'getPlaylists' });
+  });
+  $('playlistSelect').addEventListener('change', function () {
+    var opt = this.selectedOptions && this.selectedOptions[0];
+    if (!opt) return;
+    saveDisplay({ playlistId: opt.value, playlistName: opt.textContent, playlistUri: opt.dataset.uri || '' });
+  });
+
 }
 
 function isDynamicAction() {
@@ -206,6 +218,19 @@ function applySettings() {
     $('fontVal').textContent = $('optFont').value;
   }
   $('displayCard').hidden = false;
+
+  // Button cards are shown only for their own action
+  var isPlaylist = $actionName === 'playlist';
+  $('playlistCard').hidden = !isPlaylist;
+
+  if (isPlaylist) {
+    $('playlistSelect').value = s.playlistId || '';
+    // fetch the playlist list once when the panel opens
+    if (!$playlistsLoaded) {
+      $playlistsLoaded = true;
+      sendToPlugin({ type: 'getPlaylists' });
+    }
+  }
 }
 
 function applyPi(payload) {
@@ -232,6 +257,33 @@ function applyPi(payload) {
       $('authMsg').textContent = payload.message;
       $('authMsg').className = 'msg connecting';
     }
+  }
+
+  if (payload.type === 'playlists') {
+    var sel = $('playlistSelect');
+    var cur = $settings.playlistId || '';
+    var items = payload.items || [];
+    sel.innerHTML = '';
+    var ph = document.createElement('option');
+    ph.value = '';
+    ph.textContent = '— select a playlist —';
+    sel.appendChild(ph);
+    items.forEach(function (it) {
+      var o = document.createElement('option');
+      o.value = it.id;
+      o.textContent = it.name;
+      o.dataset.uri = it.uri || '';
+      sel.appendChild(o);
+    });
+    // the saved playlist may not be in the first 50 — add it separately
+    if (cur && !items.some(function (it) { return it.id === cur; })) {
+      var o = document.createElement('option');
+      o.value = cur;
+      o.textContent = $settings.playlistName || cur;
+      o.dataset.uri = $settings.playlistUri || '';
+      sel.appendChild(o);
+    }
+    sel.value = cur;
   }
 
   if (payload.type === 'state' || payload.type === 'auth') {
@@ -291,12 +343,34 @@ function updateAuth(p) {
     return;
   }
 
+  if (p.apiError) {
+    status.textContent = 'Spotify 403 Error';
+    status.className = 'status';
+    logoutBtn.disabled = !p.loggedIn;
+    if (/owner of the app/i.test(p.apiError)) {
+      msg.textContent = '⚠️ Spotify API (403): The developer app owner (the account that created the Client ID at developer.spotify.com) must have an active Premium subscription. If you renewed on a new/different account, create a new Client ID in developer.spotify.com under your new Premium account. If renewed on the same account, Spotify developer billing sync can take a few hours.';
+    } else {
+      msg.textContent = '⚠️ Spotify API: ' + p.apiError;
+    }
+    msg.className = 'msg';
+    return;
+  }
+
   if (p.loggedIn) {
-    status.textContent = p.account ? 'Connected: ' + p.account : 'Connected';
+    var acc = p.account || '';
+    var prod = p.product ? (p.product === 'premium' ? 'Premium' : p.product) : '';
+    var full = acc;
+    if (prod) full += (full ? ' (' + prod + ')' : prod);
+    status.textContent = full ? 'Connected: ' + full : 'Connected';
     status.className = 'status ok';
     logoutBtn.disabled = false;
-    msg.textContent = '';
-    msg.className = 'msg';
+    if (p.product && p.product !== 'premium') {
+      msg.textContent = '⚠️ Account subscription type is ' + p.product + '. Playback control via the API requires Spotify Premium.';
+      msg.className = 'msg';
+    } else {
+      msg.textContent = '';
+      msg.className = 'msg';
+    }
     $('loginLink').hidden = true;
   } else {
     status.textContent = 'Not connected';

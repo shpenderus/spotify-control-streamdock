@@ -224,8 +224,15 @@ const state = {
   like403At: 0,
   likeLegacy: false, // старый эндпоинт /v1/me/library работает лучше новых — используем его
   library403: false,
+  apiError: null,
   volume: null,       // 0..100, громкость активного устройства (из /me/player)
   deviceId: null,     // id активного устройства (нужен для /volume)
+  deviceName: null,   // имя активного устройства (для кнопки «Устройство»)
+  trackStartedAt: 0,  // когда начался текущий трек (адаптивный поллинг)
+  userUri: null,      // spotify:user:{id} — для «Любимых треков»
+  episode: null,      // текущий подкаст/эпизод (для кнопки «Назад»)
+  episodeProgress: 0, // его позиция, мс
+  episodeProgressAt: 0,
   lastPoll: 0,
   lastPollOk: 0, // когда poll последний раз УСПЕШНО обновил состояние (не сетевой сбой)
   endPollId: null, // id трека, для которого уже отправлен опрос в конце трека
@@ -535,6 +542,30 @@ class VolumeEncoderAction extends Action {
   }
 }
 
+/* ---------- Кнопка плейлиста ---------- */
+
+// Кнопка-плейлист: нажатие запускает выбранный в настройках плейлист
+// (или «Любимые треки»). На кнопке — иконка и название плейлиста.
+class PlaylistAction extends Action {
+  constructor() { super('playlist', { playlistId: '', playlistName: '', playlistUri: '' }); }
+
+  render(ctx) {
+    const s = this.get(ctx);
+    this.setIcon(ctx, render.renderLabelButton({
+      glyph: 'playlist',
+      text: s.playlistName || 'Плейлист',
+      phase: Date.now(),
+      pressed: this.pressed.has(ctx)
+    }));
+  }
+
+  keyUp(ctx) {
+    this.pressed.delete(ctx);
+    this.render(ctx, true);
+    playPlaylist(ctx);
+  }
+}
+
 const actions = {
   playpause: new DynamicAction('playpause', { cover: true, title: true, artist: true, time: false, fontSize: 13, showIcon: false, timeColor: '#1DB954', autoContrast: true, progressBar: true }, 'playpause'),
   info: new DynamicAction('info', { cover: true, title: true, artist: true, time: true, fontSize: 13, timeColor: '#1DB954', autoContrast: true, progressBar: true }, 'info'),
@@ -545,7 +576,8 @@ const actions = {
   shuffle: new ShuffleAction('shuffle'),
   seek: new SeekEncoderAction('seek'),
   track: new TrackEncoderAction('track'),
-  volume: new VolumeEncoderAction('volume')
+  volume: new VolumeEncoderAction('volume'),
+  playlist: new PlaylistAction()
 };
 for (const name of Object.keys(actions)) plugin.actions[name] = actions[name];
 
@@ -661,6 +693,12 @@ function renderDynamicAll(force) {
   for (const ctx of actions.info.contexts) actions.info.render(ctx, force);
 }
 
+// Кнопка с подписью (плейлист): перерисовывается по таймеру (marquee) —
+// дедупликация картинок в setIcon не даёт лишних пересылок.
+function renderLabelAll(force) {
+  for (const ctx of actions.playlist.contexts) actions.playlist.render(ctx, force);
+}
+
 function renderLikeAll() {
   for (const ctx of actions.like.contexts) actions.like.render(ctx);
 }
@@ -681,7 +719,7 @@ function renderAll(force) {
   // Статические иконки (next/previous/энкодеры) рисуются только один раз в willAppear,
   // поэтому стартовые перерисовки (ретрай вызывает renderAll(true)) должны доходить
   // и до них — иначе устройство теряет картинку при старте, и кнопка остаётся пустой.
-  for (const name of ['next', 'previous', 'seek', 'track', 'volume']) {
+  for (const name of ['next', 'previous', 'seek', 'track', 'volume', 'playlist']) {
     for (const ctx of actions[name].contexts) actions[name].render(ctx, force);
   }
 }
@@ -723,8 +761,11 @@ async function poll() {
       state.shuffle = !!d.shuffle_state;
       state.volume = (d.device && typeof d.device.volume_percent === 'number') ? d.device.volume_percent : state.volume;
       state.deviceId = (d.device && d.device.id) || null;
+      state.deviceName = (d.device && d.device.name) || state.deviceName;
+      state.episode = null;
       state.empty = 'none';
       if (changed) {
+        state.trackStartedAt = Date.now();
         // сначала показываем кэшированный статус лайка (если есть),
         // затем в фоне подтверждаем актуальный
         const has = Object.prototype.hasOwnProperty.call(state.likedCache, track.id);
@@ -738,6 +779,10 @@ async function poll() {
         state.track = null;
         state.isPlaying = false;
         state.empty = 'nodevice';
+        state.deviceName = null;
+        state.deviceId = null;
+        state.trackStartedAt = 0;
+        state.episode = null;
         state.liked = false;
         state.likedKnown = false;
         state.lastPollOk = Date.now();
@@ -747,10 +792,16 @@ async function poll() {
       // Подкаст, эпизод или реклама — не трек: показывать нечего, состояние
       // раньше застревало на прошлой песне (кнопка «врала» весь эпизод).
       const playing = !!res.data.is_playing;
+      // Прогресс эпизода обновляем на каждом опросе — кнопка «Назад» по нему
+      // решает: >3 c в эпизоде — перезапуск, иначе — предыдущий эпизод.
+      state.episode = { id: res.data.item.id, durationMs: res.data.item.duration_ms || 0 };
+      state.episodeProgress = res.data.progress_ms || 0;
+      state.episodeProgressAt = Date.now();
       if (state.track || state.empty !== 'notrack' || state.isPlaying !== playing || state.likedKnown) {
         state.track = null;
         state.isPlaying = playing;
         state.empty = 'notrack';
+        state.trackStartedAt = 0;
         state.liked = false;
         state.likedKnown = false;
         state.lastPollOk = Date.now();
@@ -760,9 +811,14 @@ async function poll() {
       log('[poll] 429 rate limit — backing off for 30s');
       nextPollAt = Date.now() + 30000;
     } else if (res.status === 403) {
+      log('[poll] 403 Forbidden —', res.message || 'требуется Spotify Premium или нет доступа к плееру');
+      if (res.message) state.apiError = res.message;
       if (state.empty !== 'premium') { state.empty = 'premium'; renderAll(true); }
+      pushAuthState();
+    } else if (res.status === 404) {
+      log('[poll] 404 Not Found — активное устройство не найдено');
     } else if (res.status === 401) {
-      // refresh не помог — токен мёртв
+      log('[poll] 401 Unauthorized — токен недействителен');
       await auth.clearTokens();
       state.empty = 'noauth';
       pushAuthState();
@@ -851,12 +907,16 @@ async function doRefreshLike() {
 let _summaryAt = 0;
 
 function pollInterval() {
-  // Пока музыка играет — опрашиваем каждые 10 сек (смена трека, громкость
-  // с других устройств, статус лайка). На паузе следить не за чем —
-  // опрашиваем каждые 60 сек, чтобы почти не тратить дневную квоту dev-режима.
-  // Опрос в конце трека (ниже) срабатывает в момент окончания, поэтому
-  // информация о следующем треке всё равно появляется сразу, несмотря на 10 сек.
-  return (state.isPlaying && state.track) ? 10000 : 60000;
+  // Адаптивный интервал опроса. Пока трек играет — чем дольше он играет, тем
+  // реже опрашиваем (бережём лимиты API). НО трек вот-вот закончится — опрос
+  // ускоряется до 5 с, чтобы обложка и название СЛЕДУЮЩЕГО трека появились
+  // сразу, а не через адаптивную паузу. На паузе — 60 с (как раньше).
+  if (!state.isPlaying || !state.track) return 60000;
+  if (state.track.durationMs > 0 && state.track.durationMs - state.progressMs <= 10000) return 5000;
+  const age = Date.now() - state.trackStartedAt;
+  if (age < 120000) return 10000; // первые 2 минуты трека
+  if (age < 300000) return 20000; // 2–5 минут
+  return 30000;                   // дольше 5 минут
 }
 
 function tick() {
@@ -895,6 +955,12 @@ function tick() {
     state.progressMs = Math.min(state.track.durationMs, state.progressMs + (now - base));
     state.progressAt = now;
   }
+  // Прогресс подкаста — то же самое, для кнопки «Назад»
+  if (state.empty === 'notrack' && state.isPlaying && state.episode) {
+    const ebase = state.episodeProgressAt || now;
+    state.episodeProgress = Math.min(state.episode.durationMs || Number.MAX_SAFE_INTEGER, state.episodeProgress + (now - ebase));
+    state.episodeProgressAt = now;
+  }
   // Текущий трек вот-вот закончится (локальная оценка) — опрашиваем сразу,
   // чтобы информация о следующем треке (название, обложка, лайк) появилась
   // мгновенно, а не через 10 сек. Один раз на трек: маркер защищает от
@@ -913,6 +979,7 @@ function tick() {
   }
   state._lastTick = now;
   renderDynamicAll(false);
+  renderLabelAll(false);
   // Время на дисплее энкодера перемотки
   if (actions.seek.contexts.size) {
     const t = state.track ? fmtTime(state.progressMs) + ' / ' + fmtTime(state.track.durationMs) : '';
@@ -927,7 +994,7 @@ function tick() {
 setInterval(tick, 1000);
 // Бегущая строка: опрашиваем часто, но реальная перерисовка происходит только
 // когда меняется фаза кадра (2 кадра/с) — дедупликация в сигнатуре
-setInterval(() => { if (auth.hasToken()) renderDynamicAll(false); }, 100);
+setInterval(() => { if (auth.hasToken()) { renderDynamicAll(false); renderLabelAll(false); } }, 100);
 setTimeout(poll, 500);
 
 // StreamDock (MiraBox) молча теряет setImage/setState, отправленные в первые
@@ -999,12 +1066,17 @@ async function togglePlayPause(ctx) {
     let res = await spotify.setPlay(target);
     if (target && res.status === 404) {
       await new Promise((r) => setTimeout(r, 900));
-      await spotify.setPlay(true);
+      res = await spotify.setPlay(true);
+    }
+    if (res.status === 403) {
+      log('[play] 403 Forbidden — требуется Spotify Premium');
+      plugin.showAlert(ctx);
+    } else if (res.status === 404) {
+      log('[play] 404 Not Found — активное устройство не найдено (запустите Spotify)');
+      plugin.showAlert(ctx);
     }
   } catch (e) {
     if (e instanceof AuthError) { onAuthFailure(); return; }
-    // Не-AuthError (403 без Premium, 404, сеть) — показываем ошибку,
-    // раньше нажатие молча «не работало».
     plugin.showAlert(ctx);
   }
   safePoll();
@@ -1013,7 +1085,11 @@ async function togglePlayPause(ctx) {
 async function onNext(ctx) {
   if (!ensureAuthed(ctx)) return;
   try {
-    await spotify.next();
+    const res = await spotify.next();
+    if (res && res.status === 403) {
+      log('[next] 403 Forbidden — требуется Spotify Premium');
+      plugin.showAlert(ctx);
+    }
     safePoll();
     recheckAfterSkip();
   } catch (e) {
@@ -1025,9 +1101,29 @@ async function onNext(ctx) {
 async function onPrevious(ctx) {
   if (!ensureAuthed(ctx)) return;
   try {
-    await spotify.previous();
-    safePoll();
-    recheckAfterSkip();
+    // «Назад» как в Spotify: если трек играет больше ~3 секунд — возвращаемся
+    // в начало трека, а повторное нажатие (трек в начале) — на предыдущий.
+    // Прогресс сбрасываем локально: немедленный опрос после seek откатил бы
+    // позицию назад (см. дизайн перемотки энкодера).
+    const restartable = (state.track && state.progressMs > 3000) ||
+      (state.empty === 'notrack' && state.episode && state.episodeProgress > 3000);
+    if (restartable) {
+      await spotify.seek(0);
+      state.progressMs = 0;
+      state.progressAt = Date.now();
+      state.episodeProgress = 0;
+      state.episodeProgressAt = Date.now();
+      state.endPollId = null;
+      renderDynamicAll(false);
+    } else {
+      const res = await spotify.previous();
+      if (res && res.status === 403) {
+        log('[previous] 403 Forbidden — требуется Spotify Premium');
+        plugin.showAlert(ctx);
+      }
+      safePoll();
+      recheckAfterSkip();
+    }
   } catch (e) {
     if (e instanceof AuthError) onAuthFailure();
     plugin.showAlert(ctx);
@@ -1151,6 +1247,52 @@ async function toggleShuffle(ctx) {
     renderShuffleAll();
     plugin.showAlert(ctx);
   }
+}
+/* ---------- Плейлист ---------- */
+
+async function playPlaylist(ctx) {
+  if (!ensureAuthed(ctx)) return;
+  const s = actions.playlist.get(ctx);
+  if (!s.playlistUri) { plugin.showAlert(ctx); return; }
+  try {
+    let res = await spotify.playContext(s.playlistUri, state.deviceId || undefined);
+    if (res.status === 404) {
+      // активное устройство пропало — пробуем ещё раз без привязки к нему
+      await new Promise((r) => setTimeout(r, 900));
+      res = await spotify.playContext(s.playlistUri);
+    }
+    if (!(res.status >= 200 && res.status < 300)) {
+      log('[playlist] ответ:', res.status, JSON.stringify(res.data));
+      plugin.showAlert(ctx);
+    }
+  } catch (e) {
+    if (e instanceof AuthError) { onAuthFailure(); return; }
+    plugin.showAlert(ctx);
+  }
+  safePoll();
+}
+
+// Список для панели: «Любимые треки» + первые 50 плейлистов пользователя
+async function fetchPlaylists() {
+  const items = [{ id: 'liked', name: '❤️ Любимые треки', uri: null }];
+  try {
+    if (!state.userUri) {
+      const me = await spotify.me();
+      if (me.status === 200 && me.data && me.data.id) state.userUri = 'spotify:user:' + me.data.id;
+    }
+    if (state.userUri) items[0].uri = state.userUri + ':collection';
+    const res = await spotify.playlists();
+    if (res.status === 200 && Array.isArray(res.data && res.data.items)) {
+      for (const p of res.data.items) {
+        if (p && p.id && p.name) items.push({ id: p.id, name: p.name, uri: p.uri || '' });
+      }
+    } else {
+      log('[playlists] ответ:', res.status, JSON.stringify(res.data));
+    }
+  } catch (e) {
+    log('[playlists] ошибка:', e && e.message || e);
+  }
+  return items;
 }
 
 // Перемотка энкодером: каждый тик = 5 секунд (как в референс-плагине).
@@ -1298,7 +1440,7 @@ function onAuthFailure() {
 /* ============================== Property Inspector ============================== */
 
 function pushAuthState() {
-  plugin.sendToPI({ type: 'auth', ...auth.publicState(), scopes: auth.scopes(), libraryError: state.library403, logEnabled, player: playerSummary() });
+  plugin.sendToPI({ type: 'auth', ...auth.publicState(), scopes: auth.scopes(), libraryError: state.library403, apiError: state.apiError, logEnabled, player: playerSummary() });
 }
 
 function pushState(ctx) {
@@ -1310,6 +1452,7 @@ function pushState(ctx) {
     ...auth.publicState(),
     scopes: auth.scopes(),
     libraryError: state.library403,
+    apiError: state.apiError,
     logEnabled,
     player: playerSummary()
   });
@@ -1328,6 +1471,7 @@ let loginBusy = false;
 async function doLogin() {
   if (loginBusy) return; // повторный клик во время активного входа — игнорируем
   loginBusy = true;
+  state.apiError = null;
   const step = (msg) => {
     log('[login]', msg);
     plugin.sendToPI({ type: 'auth', ...auth.publicState(), status: 'connecting', message: msg, player: playerSummary() });
@@ -1348,9 +1492,16 @@ async function doLogin() {
       const me = await spotify.me();
       if (me.status === 200 && me.data) {
         auth.account = me.data.display_name || me.data.id || null;
+        auth.product = me.data.product || null;
+        log('[login] профиль получен:', auth.account, 'тип подписки:', auth.product);
         auth.save();
+      } else {
+        log('[login] me() ответ:', me.status, me.message || JSON.stringify(me.data));
+        if (me.status === 403 && me.message) state.apiError = me.message;
       }
-    } catch (e) { /* имя аккаунта не критично */ }
+    } catch (e) {
+      log('[login] me() ошибка:', e && e.message || e);
+    }
     state.empty = 'none';
     state.library403 = false;
     state.like403At = 0;
@@ -1395,6 +1546,11 @@ function handlePiMessage(ctx, payload, action) {
   switch (payload.type) {
     case 'getState':
       pushState(target);
+      break;
+    case 'getPlaylists':
+      fetchPlaylists().then((items) => {
+        plugin.sendToPI({ type: 'playlists', items });
+      });
       break;
     case 'saveAuth':
       auth.setCredentials(payload);
